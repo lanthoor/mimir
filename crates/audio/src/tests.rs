@@ -2,9 +2,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::decode_file;
-use crate::transport::{PlaybackQueue, Transport, TransportState, TransportCommand};
+use crate::transport::{PlaybackQueue, Transport, TransportCommand, TransportState};
 #[cfg(feature = "output")]
 use crate::{Player, PlayerCommand, PlayerSnapshot};
 
@@ -224,8 +225,8 @@ fn write_tiny_wav(path: &Path, samples: u32) {
     data.extend_from_slice(&(samples * 2).to_le_bytes());
     let mut f = std::fs::File::create(path).expect("create wav");
     f.write_all(&data).expect("write header");
-    for i in 0..samples {
-        let s = (i16::MAX / 2) as i16;
+    for _ in 0..samples {
+        let s = i16::MAX / 2;
         f.write_all(&s.to_le_bytes()).expect("write sample");
     }
 }
@@ -233,7 +234,6 @@ fn write_tiny_wav(path: &Path, samples: u32) {
 #[cfg(feature = "output")]
 #[test]
 fn player_play_command_transitions_to_playing() {
-    use std::time::Duration;
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("sine.wav");
     write_tiny_wav(&path, 200);
@@ -248,9 +248,10 @@ fn player_play_command_transitions_to_playing() {
         if s.state == TransportState::Playing && s.current == Some(path.clone()) {
             break;
         }
-        if std::time::Instant::now() > deadline {
-            panic!("player never transitioned to Playing; got {s:?}");
-        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "player never transitioned to Playing; got {s:?}"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -258,7 +259,6 @@ fn player_play_command_transitions_to_playing() {
 #[cfg(feature = "output")]
 #[test]
 fn player_pause_resume_stop_round_trip() {
-    use std::time::Duration;
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("sine.wav");
     write_tiny_wav(&path, 200);
@@ -275,13 +275,14 @@ fn player_pause_resume_stop_round_trip() {
     wait_for(&p, |s| s.state == TransportState::Playing);
 
     h.send(PlayerCommand::Stop).expect("send");
-    wait_for(&p, |s| s.state == TransportState::Stopped && s.current.is_none());
+    wait_for(&p, |s| {
+        s.state == TransportState::Stopped && s.current.is_none()
+    });
 }
 
 #[cfg(feature = "output")]
 #[test]
 fn player_play_missing_file_records_failure() {
-    use std::time::Duration;
     let p = Player::new();
     let h = p.handle();
     let path = PathBuf::from("/tmp/does-not-exist.wav");
@@ -294,25 +295,26 @@ fn player_play_missing_file_records_failure() {
         if s.state == TransportState::Stopped && s.current == Some(path.clone()) {
             break;
         }
-        if std::time::Instant::now() > deadline {
-            panic!("decode failure path did not converge; got {s:?}");
-        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "decode failure path did not converge; got {s:?}"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
 
 #[cfg(feature = "output")]
 fn wait_for(p: &Player, mut pred: impl FnMut(&PlayerSnapshot) -> bool) {
-    use std::time::Duration;
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
         let s = p.snapshot();
         if pred(&s) {
             return;
         }
-        if std::time::Instant::now() > deadline {
-            panic!("predicate never satisfied; got {s:?}");
-        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "predicate never satisfied; got {s:?}"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -322,7 +324,6 @@ fn wait_for(p: &Player, mut pred: impl FnMut(&PlayerSnapshot) -> bool) {
 #[cfg(feature = "output")]
 #[test]
 fn player_stop_clears_current_then_play_resets() {
-    use std::time::Duration;
     let dir = tempfile::tempdir().expect("tempdir");
     let a = dir.path().join("a.wav");
     let b = dir.path().join("b.wav");
@@ -334,7 +335,9 @@ fn player_stop_clears_current_then_play_resets() {
     h.send(PlayerCommand::Play(a.clone())).expect("send");
     wait_for(&p, |s| s.current == Some(a.clone()));
     h.send(PlayerCommand::Stop).expect("send");
-    wait_for(&p, |s| s.state == TransportState::Stopped && s.current.is_none());
+    wait_for(&p, |s| {
+        s.state == TransportState::Stopped && s.current.is_none()
+    });
 
     h.send(PlayerCommand::Play(b.clone())).expect("send");
     wait_for(&p, |s| s.current == Some(b.clone()));

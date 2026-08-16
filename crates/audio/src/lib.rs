@@ -15,7 +15,7 @@ pub mod transport;
 
 pub use decode::{decode_file, AudioBufferOut as AudioBuffer, DecodeError};
 #[cfg(feature = "output")]
-pub use player::{Player, PlayerCommand, PlayerHandle, PlayerSnapshot};
+pub use player::{Player, PlayerCommand, PlayerError, PlayerHandle, PlayerSnapshot};
 pub use transport::{Transport, TransportCommand, TransportState};
 
 #[cfg(test)]

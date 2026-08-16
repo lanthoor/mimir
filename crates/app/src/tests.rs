@@ -106,16 +106,23 @@ fn add_folder_upserts_and_returns_id() {
     assert!(id > 0);
     // Note: the ScanJob is async; the worker thread may still be running.
     // The folder row is enough to verify the command.
-    let rows: Vec<i64> = {
-        let conn = state.library().expect("lib").conn().expect("conn");
-        let rows = conn
-            .prepare("SELECT id FROM folder")
-            .expect("prep")
-            .query_map([], |r| r.get::<_, i64>(0))
-            .expect("query")
-            .map(Result::unwrap)
-            .collect();
-        rows
-    };
+    let conn = state.library().expect("lib").conn().expect("conn");
+    let rows: Vec<i64> = conn
+        .prepare("SELECT id FROM folder")
+        .expect("prep")
+        .query_map([], |r| r.get::<_, i64>(0))
+        .expect("query")
+        .map(Result::unwrap)
+        .collect();
     assert_eq!(rows, vec![id]);
+}
+
+#[test]
+fn play_track_unknown_id_returns_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let result = state.play_track(99_999, &TransportCommand::Play(99_999));
+    assert!(result.is_err());
 }

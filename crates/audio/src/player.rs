@@ -4,7 +4,7 @@
 //! which needs a system audio backend. Tests use the `output` feature only
 //! when there's a device under `/dev/snd` or on macOS / Windows.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -33,19 +33,10 @@ pub enum PlayerCommand {
 }
 
 /// Snapshot of the player state for the UI.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlayerSnapshot {
     pub state: TransportState,
     pub current: Option<PathBuf>,
-}
-
-impl Default for PlayerSnapshot {
-    fn default() -> Self {
-        Self {
-            state: TransportState::default(),
-            current: None,
-        }
-    }
 }
 
 /// Cheaply clone-able handle to send commands to the player worker thread.
@@ -164,8 +155,10 @@ impl OutputStream for CpalOutputStream {
     }
 }
 
+#[allow(dead_code)]
 struct NoopOutputStream;
 
+#[allow(dead_code)]
 impl OutputStream for NoopOutputStream {
     fn pause(&self) {}
     fn resume(&self) {}
@@ -175,29 +168,28 @@ impl OutputStream for NoopOutputStream {
 /// Worker thread: drain commands and update the snapshot. The cpal output
 /// stream is opened whenever a `Play` command succeeds and torn down on
 /// `Stop` (or replaced on the next `Play`).
+#[allow(clippy::needless_pass_by_value)]
 fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) {
     let mut output: Option<Box<dyn OutputStream>> = None;
     let buffer: SharedBuffer = Arc::new(Mutex::new(BufferState::empty()));
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
-            PlayerCommand::Play(path) => {
-                match decode_to_buffer(&path, &buffer) {
-                    Ok(_) => {
-                        {
-                            let mut snapshot = shared.lock().expect("player poisoned");
-                            snapshot.current = Some(path.clone());
-                            snapshot.state = TransportState::Playing;
-                        }
-                        output = open_output_stream(&buffer).ok();
-                    }
-                    Err(_e) => {
+            PlayerCommand::Play(path) => match decode_to_buffer(&path, &buffer) {
+                Ok(()) => {
+                    {
                         let mut snapshot = shared.lock().expect("player poisoned");
-                        snapshot.current = Some(path);
-                        snapshot.state = TransportState::Stopped;
+                        snapshot.current = Some(path.clone());
+                        snapshot.state = TransportState::Playing;
                     }
+                    output = open_output_stream(&buffer).ok();
                 }
-            }
+                Err(_e) => {
+                    let mut snapshot = shared.lock().expect("player poisoned");
+                    snapshot.current = Some(path);
+                    snapshot.state = TransportState::Stopped;
+                }
+            },
             PlayerCommand::Pause => {
                 let mut snapshot = shared.lock().expect("player poisoned");
                 snapshot.state = snapshot.state.pause();
@@ -222,18 +214,15 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                 buffer.lock().expect("buffer poisoned").position = 0;
             }
             // Queue/Next/Previous are wired in a later commit.
-            PlayerCommand::Enqueue(_)
-            | PlayerCommand::Next
-            | PlayerCommand::Previous => {}
+            PlayerCommand::Enqueue(_) | PlayerCommand::Next | PlayerCommand::Previous => {}
         }
     }
 }
 
 /// Decode `path` into the shared buffer. On any failure the buffer is
 /// cleared and the error is logged to stderr.
-fn decode_to_buffer(path: &PathBuf, buffer: &SharedBuffer) -> Result<(), PlayerError> {
-    let audio = super::decode::decode_file(path)
-        .map_err(|e| PlayerError::Decode(e.to_string()))?;
+fn decode_to_buffer(path: &Path, buffer: &SharedBuffer) -> Result<(), PlayerError> {
+    let audio = super::decode::decode_file(path).map_err(|e| PlayerError::Decode(e.to_string()))?;
     let mut state = buffer.lock().expect("buffer poisoned");
     state.samples = audio.samples;
     state.position = 0;
@@ -244,6 +233,7 @@ fn decode_to_buffer(path: &PathBuf, buffer: &SharedBuffer) -> Result<(), PlayerE
 /// output device is available (so the worker reaches the end of the song
 /// without crashing).
 #[cfg(feature = "output")]
+#[allow(clippy::cast_possible_truncation)]
 fn open_output_stream(buffer: &SharedBuffer) -> Result<Box<dyn OutputStream>, PlayerError> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -258,28 +248,28 @@ fn open_output_stream(buffer: &SharedBuffer) -> Result<Box<dyn OutputStream>, Pl
     let err_fn = |err: cpal::StreamError| eprintln!("cpal stream error: {err}");
 
     let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => device
-            .build_output_stream(
-                &config.into(),
-                {
-                    let buf = Arc::clone(buffer);
+        cpal::SampleFormat::F32 => {
+            let buf = Arc::clone(buffer);
+            device
+                .build_output_stream(
+                    &config.into(),
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         let mut state = buf.lock().expect("buffer poisoned");
                         let n = state.fill(data);
                         for s in &mut data[n..] {
                             *s = 0.0;
                         }
-                    }
-                },
-                err_fn,
-                None,
-            )
-            .map_err(|e| PlayerError::Output(format!("build output stream: {e}")))?,
-        cpal::SampleFormat::I16 => device
-            .build_output_stream(
-                &config.into(),
-                {
-                    let buf = Arc::clone(buffer);
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| PlayerError::Output(format!("build output stream: {e}")))?
+        }
+        cpal::SampleFormat::I16 => {
+            let buf = Arc::clone(buffer);
+            device
+                .build_output_stream(
+                    &config.into(),
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         let mut state = buf.lock().expect("buffer poisoned");
                         let mut tmp = vec![0.0f32; data.len()];
@@ -291,12 +281,12 @@ fn open_output_stream(buffer: &SharedBuffer) -> Result<Box<dyn OutputStream>, Pl
                                 0
                             };
                         }
-                    }
-                },
-                err_fn,
-                None,
-            )
-            .map_err(|e| PlayerError::Output(format!("build output stream: {e}")))?,
+                    },
+                    err_fn,
+                    None,
+                )
+                .map_err(|e| PlayerError::Output(format!("build output stream: {e}")))?
+        }
         // Other formats not supported in P11 — explicit error rather than a
         // silent fallback so the CI log shows the gap.
         other => {
