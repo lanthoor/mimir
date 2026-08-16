@@ -23,6 +23,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: include_str!("../../migrations/0002_fts5_diacritics.sql"),
     },
+    Migration {
+        version: 3,
+        sql: include_str!("../../migrations/0003_track_folder.sql"),
+    },
 ];
 
 const SCHEMA_VERSION_DDL: &str = "CREATE TABLE IF NOT EXISTS schema_version (\
