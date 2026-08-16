@@ -9,3 +9,6 @@ description = "Mimir core: library model, ingestion, metadata, DB."
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"
