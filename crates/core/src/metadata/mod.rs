@@ -1,7 +1,8 @@
-//! Metadata extraction.
-//!
-//! Reads tags from audio files via `lofty`, falls back to filename heuristics
-//! when tags are missing, and upserts artist / album / track rows.
+//! Metadata extraction: probe, tags, filename heuristics, DB upserts.
+
+mod probe;
 
 #[cfg(test)]
 mod tests;
+
+pub use probe::{probe_file, Probe};
