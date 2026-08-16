@@ -2,7 +2,8 @@
 
 use std::fs;
 
-use crate::metadata::{extract_tags, parse_filename, probe_file, HeuristicTags, Tags};
+use crate::db::Library;
+use crate::metadata::{extract_tags, parse_filename, probe_file, upsert_album, upsert_artist, HeuristicTags, Tags};
 
 fn minimal_mp3() -> Vec<u8> {
     // A minimal valid MPEG audio frame is enough for `lofty` to recognize
@@ -85,4 +86,43 @@ fn heuristic_handles_two_digit_track_no() {
     let path = std::path::Path::new("/music/Bon Iver/For Emma/12 - re: stacks.flac");
     let h = parse_filename(path).expect("heuristic");
     assert_eq!(h.track_no, Some(12));
+}
+
+#[test]
+fn upsert_artist_is_idempotent() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    let a1 = upsert_artist(&conn, "Björk").expect("first");
+    let a2 = upsert_artist(&conn, "Björk").expect("second");
+    assert_eq!(a1, a2);
+
+    let b = upsert_artist(&conn, "Múm").expect("different");
+    assert_ne!(a1, b);
+
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM artist", [], |row| row.get(0))
+        .expect("count");
+    assert_eq!(count, 2);
+}
+
+#[test]
+fn upsert_album_is_idempotent_and_respects_album_artist() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    let artist_id = upsert_artist(&conn, "Radiohead").expect("artist");
+    let album1 = upsert_album(&conn, "OK Computer", artist_id, Some(1997)).expect("first");
+    let album2 = upsert_album(&conn, "OK Computer", artist_id, Some(1997)).expect("second");
+    assert_eq!(album1, album2);
+
+    // Same title, different artist → different row.
+    let other_artist = upsert_artist(&conn, "compilation").expect("artist2");
+    let album3 = upsert_album(&conn, "OK Computer", other_artist, Some(1997)).expect("third");
+    assert_ne!(album1, album3);
+
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM album", [], |row| row.get(0))
+        .expect("count");
+    assert_eq!(count, 2);
 }
