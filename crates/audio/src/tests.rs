@@ -261,3 +261,30 @@ fn wait_for(p: &Player, mut pred: impl FnMut(&PlayerSnapshot) -> bool) {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+
+/// `play` followed by `stop` clears the snapshot — the next `play` should
+/// report a fresh `current`.
+#[cfg(feature = "output")]
+#[test]
+fn player_stop_clears_current_then_play_resets() {
+    use std::time::Duration;
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(PathBuf::from("/tmp/a.mp3"))).expect("send");
+    wait_for(&p, |s| s.current.is_some());
+    h.send(PlayerCommand::Stop).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Stopped && s.current.is_none());
+
+    h.send(PlayerCommand::Play(PathBuf::from("/tmp/b.mp3"))).expect("send");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        if s.current.as_deref() == Some(std::path::Path::new("/tmp/b.mp3")) {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("current never updated to /tmp/b.mp3; got {s:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
