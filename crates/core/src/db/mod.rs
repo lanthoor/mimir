@@ -10,4 +10,3 @@ mod tests;
 
 pub use error::DbError;
 pub use library::Library;
-pub(crate) use pool::Pool;

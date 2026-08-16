@@ -13,7 +13,3 @@ workspace = true
 [[bin]]
 name = "mimir"
 path = "src/main.rs"
-
-[dependencies]
-mimir-core = { path = "../core" }
-mimir-audio = { path = "../audio" }

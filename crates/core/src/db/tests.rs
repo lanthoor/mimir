@@ -72,7 +72,10 @@ fn reopen_does_not_reapply_migrations() {
         )
         .expect("query version")
     };
-    assert!(version_after_first >= 1, "first open should record version 1");
+    assert!(
+        version_after_first >= 1,
+        "first open should record version 1"
+    );
 
     // Re-opening the same DB must not error (e.g. duplicate table) and
     // must not bump the recorded version.

@@ -60,7 +60,9 @@ fn current_version(conn: &Connection) -> Result<i64, rusqlite::Error> {
     if exists == 0 {
         return Ok(0);
     }
-    conn.query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |row| {
-        row.get(0)
-    })
+    conn.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+        [],
+        |row| row.get(0),
+    )
 }
