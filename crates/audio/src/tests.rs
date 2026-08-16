@@ -1,9 +1,10 @@
-//! Tests for the audio decoder.
+//! Tests for the audio decoder + transport.
 
 use std::fs;
 use std::path::Path;
 
 use crate::decode_file;
+use crate::transport::TransportState;
 
 /// Write a tiny mono 8kHz 16-bit PCM WAV file with `n` samples.
 #[allow(
@@ -65,4 +66,35 @@ fn decode_file_rejects_unknown_extension() {
     let path = dir.path().join("not-audio.xyz");
     fs::write(&path, b"junk").expect("write");
     assert!(decode_file(&path).is_err());
+}
+
+#[test]
+fn transport_state_transitions_match_spec() {
+    // Stopped → Playing → Paused → Playing → Stopped
+    assert_eq!(TransportState::Stopped, TransportState::default());
+
+    let s = TransportState::Stopped.play();
+    assert_eq!(s, TransportState::Playing);
+
+    let s = s.pause();
+    assert_eq!(s, TransportState::Paused);
+
+    let s = s.resume();
+    assert_eq!(s, TransportState::Playing);
+
+    let s = s.stop();
+    assert_eq!(s, TransportState::Stopped);
+}
+
+#[test]
+fn transport_state_illegal_transitions_are_noops() {
+    // Pausing when already stopped stays stopped.
+    assert_eq!(TransportState::Stopped.pause(), TransportState::Stopped);
+    // Resuming when not paused is a noop.
+    assert_eq!(TransportState::Stopped.resume(), TransportState::Stopped);
+    assert_eq!(TransportState::Playing.resume(), TransportState::Playing);
+    // Stopping when already stopped is a noop.
+    assert_eq!(TransportState::Stopped.stop(), TransportState::Stopped);
+    // Playing when already playing is a noop.
+    assert_eq!(TransportState::Playing.play(), TransportState::Playing);
 }
