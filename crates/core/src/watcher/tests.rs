@@ -110,3 +110,30 @@ fn to_ingest_handles_rename_with_from_and_to() {
         }
     );
 }
+
+#[test]
+fn spawn_watcher_emits_created_for_new_audio_file() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (tx, rx) = mpsc::channel();
+
+    let handle = crate::watcher::spawn_watcher(dir.path().to_path_buf(), tx)
+        .expect("spawn_watcher");
+
+    // Give the debouncer + backend a moment to subscribe.
+    std::thread::sleep(Duration::from_millis(300));
+
+    let new_file = dir.path().join("track.mp3");
+    std::fs::write(&new_file, b"id3").expect("write file");
+
+    let event = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("watcher must emit within 5s");
+
+    assert_eq!(event.path, new_file);
+    assert_eq!(event.kind, EventKind::Created);
+
+    drop(handle);
+}
