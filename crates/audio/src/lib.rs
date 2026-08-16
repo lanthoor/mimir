@@ -8,7 +8,7 @@ pub mod decode;
 pub mod transport;
 
 pub use decode::{decode_file, AudioBufferOut as AudioBuffer, DecodeError};
-pub use transport::{PlaybackQueue, Transport, TransportCommand, TransportState};
+pub use transport::TransportState;
 
 #[cfg(test)]
 mod tests;
