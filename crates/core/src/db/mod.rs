@@ -6,8 +6,6 @@ mod migrations;
 mod pool;
 
 #[cfg(test)]
-mod dump;
-#[cfg(test)]
 mod tests;
 
 pub use error::DbError;

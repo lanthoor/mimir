@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::db::Library;
 use crate::metadata::ingest;
-use crate::query::{list_tracks, TrackRow};
+use crate::query::{list_albums, list_tracks, AlbumRow, TrackRow};
 use crate::scanner::{hash_file, ScanJob};
 
 fn seed_track(root: &std::path::Path, conn: &Connection, rel: &str, title: &str) -> i64 {
@@ -62,4 +62,28 @@ fn list_tracks_returns_all_with_pagination() {
         p1.iter().chain(p2.iter()).map(|t| t.id).collect();
     let total_ids: std::collections::HashSet<_> = total.iter().map(|t| t.id).collect();
     assert_eq!(combined, total_ids);
+}
+
+#[test]
+fn list_albums_joins_artist_name() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+
+    // Same artist, two albums.
+    seed_track(root.path(), &conn, "Radiohead/OK Computer/01 - Airbag.mp3", "Airbag");
+    seed_track(root.path(), &conn, "Radiohead/Kid A/01 - Everything.mp3", "Everything");
+
+    let albums: Vec<AlbumRow> = list_albums(&conn, 100, 0).expect("list");
+    assert_eq!(albums.len(), 2);
+
+    let titles: std::collections::HashSet<_> =
+        albums.iter().map(|a| a.title.clone()).collect();
+    assert!(titles.contains("OK Computer"));
+    assert!(titles.contains("Kid A"));
+
+    // Every album has the artist joined.
+    for a in &albums {
+        assert_eq!(a.artist_name.as_deref(), Some("Radiohead"));
+    }
 }
