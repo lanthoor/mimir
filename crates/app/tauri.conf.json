@@ -21,8 +21,20 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
-    "icon": ["icons/icon.png"]
+    "active": true,
+    "targets": ["appimage", "deb"],
+    "category": "Music",
+    "shortDescription": "A music catalog and player",
+    "longDescription": "mimir watches folders, extracts metadata, and plays your local music library.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png"
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0"]
+      }
+    }
   }
 }
