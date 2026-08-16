@@ -102,19 +102,31 @@ fn fts5_matches_diacritics() {
 
     // Seed an artist + album + track with a diacritic in the title.
     conn.execute(
-        "INSERT INTO artist (id, name, sort_name) VALUES (1, 'Björk', 'Bjork')",
+        "INSERT INTO artist (name, sort_name) VALUES ('Björk', 'Bjork')",
         [],
     )
     .expect("insert artist");
+    let artist_id: i64 = conn
+        .query_row("SELECT id FROM artist WHERE name = 'Björk'", [], |row| {
+            row.get(0)
+        })
+        .expect("artist id");
     conn.execute(
-        "INSERT INTO album (id, title, album_artist_id) VALUES (1, 'Homogénic', 1)",
-        [],
+        "INSERT INTO album (title, album_artist_id) VALUES ('Homogénic', ?1)",
+        [artist_id],
     )
     .expect("insert album");
+    let album_id: i64 = conn
+        .query_row(
+            "SELECT id FROM album WHERE title = 'Homogénic'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("album id");
     conn.execute(
-        "INSERT INTO track (id, path, path_hash, mtime_ns, size_bytes, codec, title, album_id) \
-         VALUES (1, '/x.mp3', X'00', 0, 0, 'mp3', 'Jóga', 1)",
-        [],
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, album_id) \
+         VALUES ('/x.mp3', X'00', 0, 0, 'mp3', 'Jóga', ?1)",
+        [album_id],
     )
     .expect("insert track");
 

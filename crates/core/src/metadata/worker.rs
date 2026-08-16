@@ -99,7 +99,11 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
 
     let track_id: i64 = tx.query_row(
         "SELECT id FROM track WHERE path_hash = ?1 AND mtime_ns = ?2 AND size_bytes = ?3",
-        rusqlite::params![&file_hash.path_hash[..], file_hash.mtime_ns, file_hash.size_bytes],
+        rusqlite::params![
+            &file_hash.path_hash[..],
+            file_hash.mtime_ns,
+            file_hash.size_bytes
+        ],
         |row| row.get(0),
     )?;
 
@@ -140,6 +144,7 @@ fn apply_heuristic(path: &Path, tags: &mut Tags) {
 /// Drain `rx` and call `ingest` for each job. Returns when the sender
 /// closes the channel. Per-job errors are logged to stderr; the worker
 /// keeps going.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run_worker(conn: &Connection, rx: std::sync::mpsc::Receiver<ScanJob>) {
     while let Ok(job) = rx.recv() {
         if let Err(e) = ingest(conn, job) {

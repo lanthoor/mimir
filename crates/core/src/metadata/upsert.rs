@@ -6,11 +6,9 @@ use rusqlite::{Connection, OptionalExtension};
 /// with the same name return the same id.
 pub fn upsert_artist(conn: &Connection, name: &str) -> rusqlite::Result<i64> {
     if let Some(id) = conn
-        .query_row(
-            "SELECT id FROM artist WHERE name = ?1",
-            [name],
-            |row| row.get::<_, i64>(0),
-        )
+        .query_row("SELECT id FROM artist WHERE name = ?1", [name], |row| {
+            row.get::<_, i64>(0)
+        })
         .optional()?
     {
         return Ok(id);
@@ -21,11 +19,9 @@ pub fn upsert_artist(conn: &Connection, name: &str) -> rusqlite::Result<i64> {
         "INSERT OR IGNORE INTO artist (name, sort_name) VALUES (?1, ?2)",
         rusqlite::params![name, &sort_name],
     )?;
-    conn.query_row(
-        "SELECT id FROM artist WHERE name = ?1",
-        [name],
-        |row| row.get::<_, i64>(0),
-    )
+    conn.query_row("SELECT id FROM artist WHERE name = ?1", [name], |row| {
+        row.get::<_, i64>(0)
+    })
 }
 
 /// Persist an album row keyed by `(title, album_artist_id)`. Returns the
@@ -61,7 +57,10 @@ pub fn upsert_album(
 /// `Björk` → `Bjork`; preserves case folding but strips leading articles.
 fn sort_name(name: &str) -> String {
     let lower = name.to_lowercase();
-    let stripped = match lower.strip_prefix("the ").or_else(|| lower.strip_prefix("a ")) {
+    let stripped = match lower
+        .strip_prefix("the ")
+        .or_else(|| lower.strip_prefix("a "))
+    {
         Some(s) => s,
         None => &lower,
     };

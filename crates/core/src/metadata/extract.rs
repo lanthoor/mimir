@@ -50,30 +50,30 @@ fn extract_from_tagged(tagged: &lofty::file::TaggedFile) -> Tags {
     };
 
     Tags {
-        title: read_str(primary, ItemKey::TrackTitle),
-        artist: read_str(primary, ItemKey::TrackArtist),
-        album: read_str(primary, ItemKey::AlbumTitle),
-        album_artist: read_str(primary, ItemKey::AlbumArtist),
-        track_no: read_u32(primary, ItemKey::TrackNumber),
-        disc_no: read_u32(primary, ItemKey::DiscNumber),
-        year: read_u32(primary, ItemKey::Year),
-        genre: read_str(primary, ItemKey::Genre),
-        composer: read_str(primary, ItemKey::Composer),
+        title: read_str(primary, &ItemKey::TrackTitle),
+        artist: read_str(primary, &ItemKey::TrackArtist),
+        album: read_str(primary, &ItemKey::AlbumTitle),
+        album_artist: read_str(primary, &ItemKey::AlbumArtist),
+        track_no: read_u32(primary, &ItemKey::TrackNumber),
+        disc_no: read_u32(primary, &ItemKey::DiscNumber),
+        year: read_u32(primary, &ItemKey::Year),
+        genre: read_str(primary, &ItemKey::Genre),
+        composer: read_str(primary, &ItemKey::Composer),
     }
 }
 
-fn read_str(tag: &Tag, key: ItemKey) -> Option<String> {
+fn read_str(tag: &Tag, key: &ItemKey) -> Option<String> {
     for item in tag.items() {
-        if *item.key() == key {
+        if item.key() == key {
             return item.value().text().map(str::to_string);
         }
     }
     None
 }
 
-fn read_u32(tag: &Tag, key: ItemKey) -> Option<u32> {
+fn read_u32(tag: &Tag, key: &ItemKey) -> Option<u32> {
     for item in tag.items() {
-        if *item.key() == key {
+        if item.key() == key {
             return item.value().text().and_then(|s| s.parse::<u32>().ok());
         }
     }

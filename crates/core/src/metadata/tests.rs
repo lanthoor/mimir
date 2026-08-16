@@ -4,7 +4,8 @@ use std::fs;
 
 use crate::db::Library;
 use crate::metadata::{
-    extract_tags, ingest, parse_filename, probe_file, upsert_album, upsert_artist, HeuristicTags, Tags,
+    extract_tags, ingest, parse_filename, probe_file, upsert_album, upsert_artist, HeuristicTags,
+    Tags,
 };
 use crate::scanner::ScanJob;
 
@@ -96,6 +97,12 @@ fn upsert_artist_is_idempotent() {
     let lib = Library::in_memory().expect("in-memory");
     let conn = lib.conn().expect("conn");
 
+    // Migration 0004 already seeded an "Unknown Artist" row.
+    let baseline: i64 = conn
+        .query_row("SELECT COUNT(*) FROM artist", [], |row| row.get(0))
+        .expect("baseline count");
+    assert_eq!(baseline, 1);
+
     let a1 = upsert_artist(&conn, "Björk").expect("first");
     let a2 = upsert_artist(&conn, "Björk").expect("second");
     assert_eq!(a1, a2);
@@ -106,7 +113,7 @@ fn upsert_artist_is_idempotent() {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM artist", [], |row| row.get(0))
         .expect("count");
-    assert_eq!(count, 2);
+    assert_eq!(count, baseline + 2);
 }
 
 #[test]
@@ -166,7 +173,9 @@ fn ingest_writes_artist_album_and_track_in_one_tx() {
     assert_eq!(artist_count, 2, "Unknown Artist (seed) + Björk");
 
     let bjork_id: i64 = conn
-        .query_row("SELECT id FROM artist WHERE name = 'Björk'", [], |row| row.get(0))
+        .query_row("SELECT id FROM artist WHERE name = 'Björk'", [], |row| {
+            row.get(0)
+        })
         .expect("björk id");
     assert!(bjork_id > 0);
 
