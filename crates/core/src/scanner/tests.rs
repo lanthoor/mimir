@@ -17,13 +17,13 @@ fn walk_yields_audio_files_only() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
 
-    touch(&root, "a.mp3");
-    touch(&root, "b.flac");
+    touch(root, "a.mp3");
+    touch(root, "b.flac");
     let nested = root.join("Album");
     fs::create_dir(&nested).expect("mkdir");
     touch(&nested, "01 - Track.opus");
     touch(&nested, "cover.jpg");
-    touch(&root, "notes.txt");
+    touch(root, "notes.txt");
     let deeper = nested.join("Disc 2");
     fs::create_dir(&deeper).expect("mkdir");
     touch(&deeper, "song.wav");
@@ -60,8 +60,16 @@ fn hash_file_is_deterministic_and_reports_metadata() {
 
     // Metadata matches `std::fs::metadata`.
     let meta = fs::metadata(&p).expect("metadata");
-    assert_eq!(h1.size_bytes, meta.len() as i64);
-    assert_eq!(h1.mtime_ns, meta.modified().expect("mtime").duration_since(std::time::UNIX_EPOCH).expect("since epoch").as_nanos() as i64);
+    assert_eq!(h1.size_bytes, meta.len().cast_signed());
+    let expected_mtime_ns = i64::try_from(
+        meta.modified()
+            .expect("mtime")
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("since epoch")
+            .as_nanos(),
+    )
+    .expect("mtime fits in i64");
+    assert_eq!(h1.mtime_ns, expected_mtime_ns);
 }
 
 #[test]
@@ -131,7 +139,8 @@ fn scan_root_emits_jobs_for_new_files_and_skips_known() {
 
     let (tx, rx) = std::sync::mpsc::channel::<ScanJob>();
     scan_root(&conn, root.path(), tx).expect("scan_root");
-    // scan_root closes `tx` when done, so recv will exit when drained.
+    // scan_root takes tx by value and drops it before returning, so the
+    // channel is closed and recv will exit when drained.
 
     let jobs: Vec<ScanJob> = rx.into_iter().collect();
     // `known.mp3` is skipped; only `fresh.mp3` should be emitted.

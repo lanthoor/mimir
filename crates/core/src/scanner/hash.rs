@@ -36,7 +36,7 @@ pub fn hash_file(path: &Path) -> Result<FileHash, HashError> {
     let path_hash: [u8; 32] = blake3::hash(&bytes).into();
 
     let meta = fs::metadata(path)?;
-    let size_bytes = meta.len() as i64;
+    let size_bytes = meta.len().cast_signed();
     let mtime = meta
         .modified()?
         .duration_since(UNIX_EPOCH)

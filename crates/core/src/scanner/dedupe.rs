@@ -27,11 +27,11 @@ pub struct ScanJob {
 /// A `track` row is considered "known" when its `(path_hash, mtime_ns,
 /// size_bytes)` triple matches — same content + same mtime + same size. This
 /// triple survives renames, so re-scans are cheap.
-pub fn scan_root(
-    conn: &Connection,
-    root: &Path,
-    tx: Sender<ScanJob>,
-) -> rusqlite::Result<()> {
+///
+/// `tx` is taken by value so the channel is closed when this function
+/// returns, letting the receiver's `recv()` exit on its own.
+#[allow(clippy::needless_pass_by_value)]
+pub fn scan_root(conn: &Connection, root: &Path, tx: Sender<ScanJob>) -> rusqlite::Result<()> {
     let folder_id = upsert_folder(conn, root)?;
     for path in walk_audio_files(root) {
         let Ok(file_hash) = hash_file(&path) else {

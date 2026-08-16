@@ -14,6 +14,6 @@ pub fn walk_audio_files(root: &Path) -> impl Iterator<Item = PathBuf> {
         .into_iter()
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
-        .map(|e| e.into_path())
+        .map(walkdir::DirEntry::into_path)
         .filter(|p| is_audio_path(p))
 }
