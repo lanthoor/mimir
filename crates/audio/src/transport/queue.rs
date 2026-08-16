@@ -44,6 +44,7 @@ impl PlaybackQueue {
 
     /// Advance the cursor; return the new current track id, or `None` at
     /// the end of the queue.
+    #[allow(clippy::should_implement_trait)] // not an Iterator::next
     pub fn next(&mut self) -> Option<i64> {
         let i = self.current_index?;
         let next_i = i + 1;

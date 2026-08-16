@@ -19,7 +19,9 @@ pub struct OutputDeviceInfo {
 /// host itself can't be queried (e.g. sandbox blocks alsa/pipewire).
 pub fn list_output_devices() -> Result<Vec<OutputDeviceInfo>, cpal::HostUnavailable> {
     let host = cpal::default_host();
-    let default = host.default_output_device().map(|d| d.name().unwrap_or_default());
+    let default = host
+        .default_output_device()
+        .map(|d| d.name().unwrap_or_default());
 
     let mut out = Vec::new();
     for device in host.output_devices().map_err(cpal::HostUnavailable::from)? {

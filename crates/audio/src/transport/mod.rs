@@ -43,6 +43,7 @@ impl Transport {
 
     /// Apply a single command. The output sink is expected to be driven
     /// separately — see `Transport::current_track()`.
+    #[allow(clippy::needless_pass_by_value)] // TransportCommand owns data
     pub fn dispatch(&mut self, cmd: TransportCommand) {
         match cmd {
             TransportCommand::Play(track_id) => {
