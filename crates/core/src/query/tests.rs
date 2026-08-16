@@ -18,8 +18,7 @@ fn seed_track(root: &std::path::Path, conn: &Connection, rel: &str, title: &str)
     // mtime_ns is unique even on coarse-resolution filesystems.
     std::fs::write(&p, title.as_bytes()).expect("write");
     std::thread::sleep(std::time::Duration::from_millis(5));
-    let folder_id =
-        crate::scanner::upsert_folder(conn, p.parent().unwrap()).expect("folder");
+    let folder_id = crate::scanner::upsert_folder(conn, p.parent().unwrap()).expect("folder");
     let file_hash = hash_file(&p).expect("hash");
     let id = ingest(
         conn,
@@ -60,8 +59,7 @@ fn list_tracks_returns_all_with_pagination() {
     let p1 = list_tracks(&conn, 2, 0).expect("p1");
     let p2 = list_tracks(&conn, 2, 2).expect("p2");
     let total = list_tracks(&conn, 100, 0).expect("all");
-    let combined: std::collections::HashSet<_> =
-        p1.iter().chain(p2.iter()).map(|t| t.id).collect();
+    let combined: std::collections::HashSet<_> = p1.iter().chain(p2.iter()).map(|t| t.id).collect();
     let total_ids: std::collections::HashSet<_> = total.iter().map(|t| t.id).collect();
     assert_eq!(combined, total_ids);
 }
@@ -73,14 +71,23 @@ fn list_albums_joins_artist_name() {
     let root = tempfile::tempdir().expect("tempdir");
 
     // Same artist, two albums.
-    seed_track(root.path(), &conn, "Radiohead/OK Computer/01 - Airbag.mp3", "Airbag");
-    seed_track(root.path(), &conn, "Radiohead/Kid A/01 - Everything.mp3", "Everything");
+    seed_track(
+        root.path(),
+        &conn,
+        "Radiohead/OK Computer/01 - Airbag.mp3",
+        "Airbag",
+    );
+    seed_track(
+        root.path(),
+        &conn,
+        "Radiohead/Kid A/01 - Everything.mp3",
+        "Everything",
+    );
 
     let albums: Vec<AlbumRow> = list_albums(&conn, 100, 0).expect("list");
     assert_eq!(albums.len(), 2);
 
-    let titles: std::collections::HashSet<_> =
-        albums.iter().map(|a| a.title.clone()).collect();
+    let titles: std::collections::HashSet<_> = albums.iter().map(|a| a.title.clone()).collect();
     assert!(titles.contains("OK Computer"));
     assert!(titles.contains("Kid A"));
 
@@ -98,7 +105,12 @@ fn list_artists_is_sorted_by_sort_name() {
 
     // Migration 0004 seeds "Unknown Artist" first; pick names that sort
     // before / after it.
-    seed_track(root.path(), &conn, "Björk/Homogenic/01 - Hunter.mp3", "Hunter");
+    seed_track(
+        root.path(),
+        &conn,
+        "Björk/Homogenic/01 - Hunter.mp3",
+        "Hunter",
+    );
     seed_track(root.path(), &conn, "Múm/Finally We Are/01 - We.mp3", "We");
 
     let artists: Vec<ArtistRow> = list_artists(&conn).expect("list");

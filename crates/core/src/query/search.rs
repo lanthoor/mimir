@@ -4,11 +4,11 @@ use rusqlite::Connection;
 
 use super::tracks::{row_to_track, TrackRow};
 
-/// Return up to `limit` tracks matching `query` (FTS5 MATCH syntax). The
-/// result is ordered by FTS rank, then track id.
+/// Return up to `limit` tracks matching `query` (`SQLite` FTS5 MATCH syntax).
+/// The result is ordered by FTS rank, then track id.
 ///
 /// Supports field operators (`title:`, `album:`, `artist:`), phrase quotes,
-/// `OR` / `AND`, `-negation`, prefix `*` — see SQLite FTS5 docs.
+/// `OR` / `AND`, negation (`-foo`), prefix (`*`) — see `SQLite` FTS5 docs.
 pub fn search_tracks(
     conn: &Connection,
     query: &str,
