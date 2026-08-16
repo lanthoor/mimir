@@ -30,6 +30,20 @@ fn search_before_open_returns_error() {
 }
 
 #[test]
+fn app_state_implicitly_opens_default_library() {
+    // `AppState::new()` must open the library at the user's default data
+    // location so the SPA can call `library_add_folder` immediately on
+    // first run. We can't reach the real `$XDG_DATA_HOME` from a unit test,
+    // so this test only verifies the *shape* of the post-construct state:
+    // the library is open, and the path is non-empty.
+    let state = AppState::new();
+    let status = state.library_status();
+    assert!(status.path.is_some(), "implicit open must set a path");
+    assert!(status.last_error.is_none(), "implicit open must not error");
+    assert!(state.is_open(), "library must be open after construction");
+}
+
+#[test]
 fn transport_commands_dispatch_in_order() {
     let state = AppState::new();
     state.send_transport(TransportCommand::Play(42));
