@@ -2,6 +2,7 @@
 
 mod error;
 mod library;
+mod migrations;
 mod pool;
 
 #[cfg(test)]
