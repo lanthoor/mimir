@@ -3,7 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use crate::scanner::{hash_file, walk_audio_files};
+use crate::db::Library;
+use crate::scanner::{hash_file, upsert_folder, walk_audio_files};
 
 fn touch(dir: &Path, name: &str) -> std::path::PathBuf {
     let p = dir.join(name);
@@ -74,4 +75,22 @@ fn hash_file_differs_for_different_content() {
     let ha = hash_file(&a).expect("hash a");
     let hb = hash_file(&b).expect("hash b");
     assert_ne!(ha.path_hash, hb.path_hash);
+}
+
+#[test]
+fn upsert_folder_is_idempotent() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    let id1 = upsert_folder(&conn, "/music/A").expect("first");
+    let id2 = upsert_folder(&conn, "/music/A").expect("second");
+    assert_eq!(id1, id2, "same path must return same folder id");
+
+    let id3 = upsert_folder(&conn, "/music/B").expect("third");
+    assert_ne!(id1, id3, "different path must return a new id");
+
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM folder", [], |row| row.get(0))
+        .expect("count");
+    assert_eq!(count, 2, "only two folders must be persisted");
 }
