@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use crate::metadata::{extract_tags, probe_file, Tags};
+use crate::metadata::{extract_tags, parse_filename, probe_file, HeuristicTags, Tags};
 
 fn minimal_mp3() -> Vec<u8> {
     // A minimal valid MPEG audio frame is enough for `lofty` to recognize
@@ -57,4 +57,32 @@ fn extract_tags_handles_missing_tag_gracefully() {
     // No embedded tags — should not error, just return mostly-None.
     let tags = extract_tags(&p).expect("extract");
     assert!(matches!(tags, Tags { .. }));
+}
+
+#[test]
+fn heuristic_parses_artist_album_track_title() {
+    let path = std::path::Path::new("/music/Pink Floyd/Dark Side of the Moon/05 - Money.flac");
+    let h = parse_filename(path).expect("heuristic");
+    assert_eq!(
+        h,
+        HeuristicTags {
+            artist: Some("Pink Floyd".into()),
+            album: Some("Dark Side of the Moon".into()),
+            track_no: Some(5),
+            title: Some("Money".into()),
+        }
+    );
+}
+
+#[test]
+fn heuristic_returns_none_for_unparseable() {
+    let path = std::path::Path::new("/music/random.mp3");
+    assert!(parse_filename(path).is_none());
+}
+
+#[test]
+fn heuristic_handles_two_digit_track_no() {
+    let path = std::path::Path::new("/music/Bon Iver/For Emma/12 - re: stacks.flac");
+    let h = parse_filename(path).expect("heuristic");
+    assert_eq!(h.track_no, Some(12));
 }
