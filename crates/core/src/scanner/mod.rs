@@ -4,9 +4,11 @@
 //! upserts folder rows. Emits `ScanJob`s to a channel for downstream
 //! metadata extraction.
 
+mod hash;
 mod walk;
 
 #[cfg(test)]
 mod tests;
 
+pub use hash::{hash_file, FileHash};
 pub use walk::walk_audio_files;
