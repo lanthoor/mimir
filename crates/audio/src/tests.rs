@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::decode_file;
-use crate::transport::TransportState;
+use crate::transport::{PlaybackQueue, TransportState};
 
 /// Write a tiny mono 8kHz 16-bit PCM WAV file with `n` samples.
 #[allow(
@@ -97,4 +97,24 @@ fn transport_state_illegal_transitions_are_noops() {
     assert_eq!(TransportState::Stopped.stop(), TransportState::Stopped);
     // Playing when already playing is a noop.
     assert_eq!(TransportState::Playing.play(), TransportState::Playing);
+}
+
+#[test]
+fn queue_push_clear_and_next_prev() {
+    let mut q = PlaybackQueue::new();
+    q.push(10);
+    q.push(20);
+    q.push(30);
+    assert_eq!(q.items(), &[10, 20, 30]);
+    assert_eq!(q.current(), Some(10));
+
+    assert_eq!(q.next(), Some(20));
+    assert_eq!(q.next(), Some(30));
+    assert_eq!(q.next(), None, "end of queue");
+
+    assert_eq!(q.previous(), Some(20));
+
+    q.clear();
+    assert!(q.is_empty());
+    assert_eq!(q.current(), None);
 }
