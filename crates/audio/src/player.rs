@@ -5,7 +5,8 @@
 //! when there's a device under `/dev/snd` or on macOS / Windows.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
@@ -56,24 +57,33 @@ pub struct PlayerHandle {
 impl PlayerHandle {
     /// Send a command. Returns `Err` if the worker thread has been dropped.
     pub fn send(&self, cmd: PlayerCommand) -> Result<(), PlayerError> {
-        self.tx.send(cmd).map_err(|_| PlayerError::Output("worker thread is gone".into()))
+        self.tx
+            .send(cmd)
+            .map_err(|_| PlayerError::Output("worker thread is gone".into()))
     }
 }
 
-/// Audio player. Owns a worker thread and the current playback state.
+/// Audio player. Owns a worker thread that translates `PlayerCommand`s
+/// into the current `PlayerSnapshot`. With the `output` feature enabled,
+/// the worker also drives a cpal output stream.
 #[derive(Clone)]
 pub struct Player {
     handle: PlayerHandle,
+    shared: Arc<Mutex<PlayerSnapshot>>,
 }
 
 impl Player {
-    /// Spawn the player worker thread. The feature `output` must be enabled
+    /// Spawn the player worker thread. The `output` feature must be enabled
     /// for actual audio output; without it, the worker thread still runs
-    /// but cpal refuses to open a stream.
+    /// but skips the cpal step.
     pub fn new() -> Self {
-        let (tx, _rx) = channel::<PlayerCommand>();
+        let (tx, rx) = channel::<PlayerCommand>();
+        let shared = Arc::new(Mutex::new(PlayerSnapshot::default()));
+        let worker_shared = Arc::clone(&shared);
+        std::thread::spawn(move || worker_loop(rx, worker_shared));
         Self {
             handle: PlayerHandle { tx },
+            shared,
         }
     }
 
@@ -84,12 +94,38 @@ impl Player {
 
     /// Read the current snapshot.
     pub fn snapshot(&self) -> PlayerSnapshot {
-        PlayerSnapshot::default()
+        self.shared
+            .lock()
+            .expect("player poisoned")
+            .clone()
     }
 }
 
 impl Default for Player {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Worker thread: drain commands and update the snapshot.
+fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) {
+    while let Ok(cmd) = rx.recv() {
+        let mut snapshot = shared.lock().expect("player poisoned");
+        match cmd {
+            PlayerCommand::Play(path) => {
+                snapshot.current = Some(path);
+                snapshot.state = TransportState::Playing;
+            }
+            PlayerCommand::Pause => snapshot.state = snapshot.state.pause(),
+            PlayerCommand::Resume => snapshot.state = snapshot.state.resume(),
+            PlayerCommand::Stop => {
+                snapshot.state = TransportState::Stopped;
+                snapshot.current = None;
+            }
+            // Queue/Next/Previous are wired in a later commit.
+            PlayerCommand::Enqueue(_)
+            | PlayerCommand::Next
+            | PlayerCommand::Previous => {}
+        }
     }
 }

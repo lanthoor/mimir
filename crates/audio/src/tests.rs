@@ -1,7 +1,7 @@
 //! Tests for the audio decoder + transport.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::decode_file;
 use crate::transport::{PlaybackQueue, Transport, TransportState, TransportCommand};
@@ -202,4 +202,62 @@ fn player_new_starts_in_stopped_state() {
     assert_eq!(p.snapshot(), PlayerSnapshot::default());
     assert_eq!(p.snapshot().state, TransportState::Stopped);
     assert!(p.snapshot().current.is_none());
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_play_command_transitions_to_playing() {
+    use std::time::Duration;
+    let p = Player::new();
+    let h = p.handle();
+    let path = PathBuf::from("/tmp/fake-track.mp3");
+    h.send(PlayerCommand::Play(path.clone())).expect("send");
+
+    // The worker thread is independent; poll for the state change.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        if s.state == TransportState::Playing && s.current == Some(path.clone()) {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("player never transitioned to Playing; got {s:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_pause_resume_stop_round_trip() {
+    use std::time::Duration;
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(PathBuf::from("/tmp/x.mp3"))).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Playing);
+
+    h.send(PlayerCommand::Pause).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Paused);
+
+    h.send(PlayerCommand::Resume).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Playing);
+
+    h.send(PlayerCommand::Stop).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Stopped);
+}
+
+#[cfg(feature = "output")]
+fn wait_for(p: &Player, mut pred: impl FnMut(&PlayerSnapshot) -> bool) {
+    use std::time::Duration;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        if pred(&s) {
+            return;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("predicate never satisfied; got {s:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
