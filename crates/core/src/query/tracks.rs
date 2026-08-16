@@ -40,7 +40,7 @@ pub fn list_tracks(
     Ok(rows)
 }
 
-fn row_to_track(row: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
+pub(crate) fn row_to_track(row: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
     Ok(TrackRow {
         id: row.get(0)?,
         path: row.get(1)?,
