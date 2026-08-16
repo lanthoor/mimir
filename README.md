@@ -1,5 +1,7 @@
 # Mimir
 
+![Mimir banner](docs/banner.png)
+
 > Cross-platform music catalog and player.
 > Desktop only (Windows / Linux / macOS). All data local by default.
 
