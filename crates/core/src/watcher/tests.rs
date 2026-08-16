@@ -32,8 +32,8 @@ fn ingest_event_carries_path_and_kind() {
 #[test]
 fn is_audio_path_accepts_supported_extensions() {
     for ext in ["mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff", "alac"] {
-        let p = Path::new(&format!("/x/song.{ext}"));
-        assert!(is_audio_path(p), "{ext} should be audio");
+        let path = format!("/x/song.{ext}");
+        assert!(is_audio_path(Path::new(&path)), "{ext} should be audio");
     }
 }
 

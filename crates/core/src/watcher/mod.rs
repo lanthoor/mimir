@@ -9,4 +9,4 @@ mod event;
 #[cfg(test)]
 mod tests;
 
-pub use event::{EventKind, IngestEvent};
+pub use event::{is_audio_path, EventKind, IngestEvent};
