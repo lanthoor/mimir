@@ -115,6 +115,7 @@ fn upsert_album_is_idempotent_and_respects_album_artist() {
     let conn = lib.conn().expect("conn");
 
     let artist_id = upsert_artist(&conn, "Radiohead").expect("artist");
+    println!("artist_id={artist_id}");
     let album1 = upsert_album(&conn, "OK Computer", artist_id, Some(1997)).expect("first");
     let album2 = upsert_album(&conn, "OK Computer", artist_id, Some(1997)).expect("second");
     assert_eq!(album1, album2);
@@ -158,10 +159,16 @@ fn ingest_writes_artist_album_and_track_in_one_tx() {
     let track_id = ingest(&conn, job).expect("ingest");
 
     // Artist + album + track rows exist.
+    // (Migration 0004 seeds an "Unknown Artist" row; Björk is the second.)
     let artist_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM artist", [], |row| row.get(0))
         .expect("artist count");
-    assert_eq!(artist_count, 1, "one artist (Björk) should be upserted");
+    assert_eq!(artist_count, 2, "Unknown Artist (seed) + Björk");
+
+    let bjork_id: i64 = conn
+        .query_row("SELECT id FROM artist WHERE name = 'Björk'", [], |row| row.get(0))
+        .expect("björk id");
+    assert!(bjork_id > 0);
 
     let album_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM album", [], |row| row.get(0))
