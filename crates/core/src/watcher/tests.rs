@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::watcher::{is_audio_path, to_ingest, EventKind, IngestEvent};
+use crate::watcher::{is_audio_path, to_ingest, to_ingest_pair, EventKind, IngestEvent};
 
 #[test]
 fn ingest_event_carries_path_and_kind() {
@@ -100,7 +100,7 @@ fn to_ingest_handles_rename_with_from_and_to() {
         paths: vec![PathBuf::from("/x/old.mp3")],
         ..notify::Event::default()
     };
-    let mapped = to_ingest_pair(&from, &ev).expect("rename pair should map");
+    let mapped = to_ingest_pair(Some(&from), &ev).expect("rename pair should map");
     assert_eq!(mapped.path, PathBuf::from("/x/new.mp3"));
     assert_eq!(
         mapped.kind,
