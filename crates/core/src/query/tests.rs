@@ -4,7 +4,9 @@ use rusqlite::Connection;
 
 use crate::db::Library;
 use crate::metadata::ingest;
-use crate::query::{list_albums, list_artists, list_tracks, AlbumRow, ArtistRow, TrackRow};
+use crate::query::{
+    list_albums, list_artists, list_tracks, search_tracks, AlbumRow, ArtistRow, TrackRow,
+};
 use crate::scanner::{hash_file, ScanJob};
 
 fn seed_track(root: &std::path::Path, conn: &Connection, rel: &str, title: &str) -> i64 {
@@ -108,4 +110,34 @@ fn list_artists_is_sorted_by_sort_name() {
         vec!["Björk", "Múm", "Unknown Artist"],
         "expected sort order, got {names:?}"
     );
+}
+
+#[test]
+fn search_tracks_matches_title_via_fts() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+
+    seed_track(root.path(), &conn, "A/01 - x.mp3", "Money");
+    seed_track(root.path(), &conn, "B/02 - y.mp3", "Time");
+    seed_track(root.path(), &conn, "C/03 - z.mp3", "Breathe");
+
+    let hits = search_tracks(&conn, "money", 50).expect("search");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].title.as_deref(), Some("Money"));
+
+    let hits = search_tracks(&conn, "time OR breathe", 50).expect("search");
+    assert_eq!(hits.len(), 2);
+}
+
+#[test]
+fn search_tracks_is_di_acritic_insensitive() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+
+    seed_track(root.path(), &conn, "A/01 - x.mp3", "Jóga");
+
+    let hits = search_tracks(&conn, "joga", 50).expect("search");
+    assert_eq!(hits.len(), 1, "diacritic-insensitive FTS must match Jóga");
 }
