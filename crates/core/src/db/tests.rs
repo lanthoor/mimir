@@ -55,3 +55,39 @@ fn open_creates_expected_tables() {
         "missing virtual table `track_fts`; have {tables:?}"
     );
 }
+
+#[test]
+fn reopen_does_not_reapply_migrations() {
+    // Open once to apply migrations and record the schema version.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("library.sqlite");
+    let _first = Library::open(&path).expect("first open");
+
+    let version_after_first: i64 = {
+        let conn = rusqlite::Connection::open(&path).expect("raw open");
+        conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query version")
+    };
+    assert!(version_after_first >= 1, "first open should record version 1");
+
+    // Re-opening the same DB must not error (e.g. duplicate table) and
+    // must not bump the recorded version.
+    let _second = Library::open(&path).expect("second open");
+    let version_after_second: i64 = {
+        let conn = rusqlite::Connection::open(&path).expect("raw open");
+        conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query version")
+    };
+    assert_eq!(
+        version_after_first, version_after_second,
+        "schema version must not change on reopen"
+    );
+}
