@@ -9,3 +9,10 @@ description = "Mimir audio engine: decode, DSP, output."
 
 [lints]
 workspace = true
+
+[dependencies]
+symphonia = { version = "0.5", features = ["all"] }
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"

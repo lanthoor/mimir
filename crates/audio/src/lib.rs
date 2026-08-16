@@ -1,18 +1,10 @@
 //! Mimir audio crate.
 //!
-//! Phase 0 (CI Bootstrap) ships only a placeholder so the workspace builds.
-//! Real implementation lands in Tier 0.
+//! Tier 0 ships only the decoder. DSP and output land in P7.
 
-pub fn hello() -> &'static str {
-    "mimir-audio"
-}
+pub mod decode;
+
+pub use decode::{decode_file, AudioBufferOut as AudioBuffer, DecodeError};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hello_returns_crate_name() {
-        assert_eq!(hello(), "mimir-audio");
-    }
-}
+mod tests;
