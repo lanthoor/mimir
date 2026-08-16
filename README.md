@@ -17,6 +17,12 @@ A desktop music catalog and player that watches folders, extracts/enriches metad
 - [Architecture](docs/Architecture.md)
 - [Technical Decisions](docs/TechnicalDecisions.md)
 - [Plan](docs/Plan.md)
+- [Contributing](CONTRIBUTING.md)
+
+## Toolchain
+
+Pinned to **Rust 1.97.1** via `rust-toolchain.toml`. See
+[Contributing](CONTRIBUTING.md#toolchain) for details.
 
 ## Status
 
