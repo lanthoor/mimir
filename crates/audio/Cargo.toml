@@ -13,6 +13,11 @@ workspace = true
 [dependencies]
 symphonia = { version = "0.5", features = ["all"] }
 thiserror = "1"
+cpal = { version = "0.15", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+default = []
+output = ["dep:cpal"]
