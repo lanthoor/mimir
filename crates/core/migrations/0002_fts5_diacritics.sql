@@ -8,7 +8,7 @@ DROP TABLE IF EXISTS track_fts;
 
 CREATE VIRTUAL TABLE track_fts USING fts5(
   title, album, artist, genre, composer,
-  content='track', content_rowid='id', tokenize="unicode61 remove_diacritics 2"
+  tokenize="unicode61 remove_diacritics 2"
 );
 
 CREATE TRIGGER track_ai AFTER INSERT ON track BEGIN
@@ -42,7 +42,6 @@ CREATE TRIGGER track_au AFTER UPDATE ON track BEGIN
   );
 END;
 
--- Rebuild the FTS index from current track rows.
 INSERT INTO track_fts(track_fts, rowid, title, album, artist, genre, composer)
   SELECT 'rebuild',
          t.id,
