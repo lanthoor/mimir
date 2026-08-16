@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-use mimir_audio::decode_file;
+use crate::decode_file;
 
 /// Write a tiny mono 8kHz 16-bit PCM WAV file with `n` samples.
 fn write_sine_wav(path: &Path, n: u32, sample_rate: u32) {
