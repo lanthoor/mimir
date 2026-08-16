@@ -7,7 +7,7 @@ use crate::db::migrations;
 use crate::db::pool::Pool;
 
 /// An open Mimir library, backed by a `SQLite` connection pool.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Library {
     pool: Pool,
 }

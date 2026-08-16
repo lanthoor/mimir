@@ -1,9 +1,10 @@
 //! `track` row listing + paging.
 
 use rusqlite::Connection;
+use serde::Serialize;
 
 /// A track row as returned by the read-side query layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TrackRow {
     pub id: i64,
     pub path: String,

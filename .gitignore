@@ -4,6 +4,9 @@
 **/*.rs.bk
 Cargo.lock.bak
 
+# Tauri generated scaffolding
+crates/app/gen/
+
 # Editor / OS
 .idea/
 .vscode/

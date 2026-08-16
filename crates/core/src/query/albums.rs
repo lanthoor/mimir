@@ -1,9 +1,10 @@
 //! `album` listing with joined artist.
 
 use rusqlite::Connection;
+use serde::Serialize;
 
 /// An album row as returned by the read-side query layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AlbumRow {
     pub id: i64,
     pub title: String,

@@ -5,7 +5,7 @@ use std::path::Path;
 use r2d2_sqlite::SqliteConnectionManager;
 
 /// Pool of `SQLite` connections.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Pool(r2d2::Pool<SqliteConnectionManager>);
 
 impl Pool {

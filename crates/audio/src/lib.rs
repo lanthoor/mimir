@@ -10,7 +10,7 @@ pub mod output;
 pub mod transport;
 
 pub use decode::{decode_file, AudioBufferOut as AudioBuffer, DecodeError};
-pub use transport::TransportState;
+pub use transport::{Transport, TransportCommand, TransportState};
 
 #[cfg(test)]
 mod tests;
