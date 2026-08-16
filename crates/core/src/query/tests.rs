@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::db::Library;
 use crate::metadata::ingest;
-use crate::query::{list_albums, list_tracks, AlbumRow, TrackRow};
+use crate::query::{list_albums, list_artists, list_tracks, AlbumRow, ArtistRow, TrackRow};
 use crate::scanner::{hash_file, ScanJob};
 
 fn seed_track(root: &std::path::Path, conn: &Connection, rel: &str, title: &str) -> i64 {
@@ -86,4 +86,26 @@ fn list_albums_joins_artist_name() {
     for a in &albums {
         assert_eq!(a.artist_name.as_deref(), Some("Radiohead"));
     }
+}
+
+#[test]
+fn list_artists_is_sorted_by_sort_name() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+
+    // Migration 0004 seeds "Unknown Artist" first; pick names that sort
+    // before / after it.
+    seed_track(root.path(), &conn, "Björk/Homogenic/01 - Hunter.mp3", "Hunter");
+    seed_track(root.path(), &conn, "Múm/Finally We Are/01 - We.mp3", "We");
+
+    let artists: Vec<ArtistRow> = list_artists(&conn).expect("list");
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+
+    // Sorted by sort_name (lowercase, diacritics stripped by upsert).
+    assert_eq!(
+        names,
+        vec!["Björk", "Múm", "Unknown Artist"],
+        "expected sort order, got {names:?}"
+    );
 }
