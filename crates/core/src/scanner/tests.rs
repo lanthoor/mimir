@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::db::Library;
-use crate::scanner::{hash_file, upsert_folder, walk_audio_files};
+use crate::scanner::{hash_file, scan_root, upsert_folder, walk_audio_files, ScanJob};
 
 fn touch(dir: &Path, name: &str) -> std::path::PathBuf {
     let p = dir.join(name);
@@ -93,4 +93,48 @@ fn upsert_folder_is_idempotent() {
         .query_row("SELECT COUNT(*) FROM folder", [], |row| row.get(0))
         .expect("count");
     assert_eq!(count, 2, "only two folders must be persisted");
+}
+
+#[test]
+fn scan_root_emits_jobs_for_new_files_and_skips_known() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let new_file = touch(root.path(), "fresh.mp3");
+    let known_file = touch(root.path(), "known.mp3");
+    fs::write(&known_file, b"same content").expect("write known");
+
+    // Pre-import `known_file` with its current hash so scan_root must skip it.
+    let h = hash_file(&known_file).expect("hash known");
+    conn.execute(
+        "INSERT INTO folder (path, path_hash, active) VALUES (?1, ?2, 1)",
+        rusqlite::params!["/dummy/folder", &vec![0u8; 32][..]],
+    )
+    .expect("insert folder");
+    let folder_id: i64 = conn
+        .query_row("SELECT id FROM folder LIMIT 1", [], |row| row.get(0))
+        .expect("folder id");
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, folder_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![
+            known_file.to_string_lossy(),
+            &h.path_hash[..],
+            h.mtime_ns,
+            h.size_bytes,
+            "mp3",
+            folder_id,
+        ],
+    )
+    .expect("insert known track");
+
+    let (tx, rx) = std::sync::mpsc::channel::<ScanJob>();
+    scan_root(&conn, root.path(), tx).expect("scan_root");
+    // scan_root closes `tx` when done, so recv will exit when drained.
+
+    let jobs: Vec<ScanJob> = rx.into_iter().collect();
+    // `known.mp3` is skipped; only `fresh.mp3` should be emitted.
+    assert_eq!(jobs.len(), 1, "expected 1 new job, got {jobs:?}");
+    assert_eq!(jobs[0].path, new_file);
 }
