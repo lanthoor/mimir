@@ -5,10 +5,12 @@
 //! metadata extraction.
 
 mod hash;
+mod upsert;
 mod walk;
 
 #[cfg(test)]
 mod tests;
 
 pub use hash::{hash_file, FileHash};
+pub use upsert::upsert_folder;
 pub use walk::walk_audio_files;
