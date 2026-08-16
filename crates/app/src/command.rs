@@ -56,8 +56,7 @@ pub fn library_search(
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn audio_play(state: tauri::State<'_, AppState>, track_id: i64) -> Result<(), AppError> {
-    state.send_transport(TransportCommand::Play(track_id));
-    Ok(())
+    state.play_track(track_id, &TransportCommand::Play(track_id))
 }
 
 #[cfg(feature = "tauri")]

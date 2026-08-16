@@ -41,6 +41,10 @@ struct Inner {
     /// Sender end of the scan-worker channel. Drop to shut the worker down.
     scan_tx: Option<Sender<ScanJob>>,
     status: LibraryStatus,
+    /// Optional player for actual audio output. Populated when the `output`
+    /// feature is enabled.
+    #[cfg(feature = "output")]
+    player: Option<mimir_audio::Player>,
 }
 
 impl AppState {
@@ -159,6 +163,64 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state poisoned");
         inner.transport.dispatch(cmd);
     }
+
+    /// Look up the track's path in the library and start playback.
+    ///
+    /// Drives both the (legacy) transport state machine and the real
+    /// player — the transport is what the IPC handlers see, the player
+    /// is what actually produces sound (when the `output` feature is on).
+    pub fn play_track(
+        &self,
+        track_id: i64,
+        transport_cmd: &TransportCommand,
+    ) -> Result<(), AppError> {
+        // Update the transport state first so the UI sees Playing immediately.
+        self.send_transport(transport_cmd.clone());
+
+        // Look up the file path.
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let path: Option<PathBuf> = conn
+            .query_row("SELECT path FROM track WHERE id = ?1", [track_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .ok()
+            .map(PathBuf::from);
+        let Some(path) = path else {
+            return Err(AppError::Internal(format!("no track with id {track_id}")));
+        };
+
+        #[cfg(feature = "output")]
+        {
+            use mimir_audio::PlayerCommand;
+            let mut inner = self.inner.lock().expect("state poisoned");
+            if inner.player.is_none() {
+                inner.player = Some(mimir_audio::Player::new());
+            }
+            let player = inner.player.as_ref().expect("just initialized");
+            player
+                .handle()
+                .send(PlayerCommand::Play(path))
+                .map_err(AppError::from)?;
+        }
+
+        // When the `output` feature is off, the transport state is the only
+        // signal we have. The legacy `transport` is still useful for the UI.
+        #[cfg(not(feature = "output"))]
+        {
+            let _ = path;
+        }
+
+        Ok(())
+    }
+
+    /// Snapshot of the player for the front-end — None when the `output`
+    /// feature is disabled.
+    #[cfg(feature = "output")]
+    pub fn player_snapshot(&self) -> Option<mimir_audio::PlayerSnapshot> {
+        let inner = self.inner.lock().expect("state poisoned");
+        inner.player.as_ref().map(mimir_audio::Player::snapshot)
+    }
 }
 
 impl Default for AppState {
@@ -169,6 +231,8 @@ impl Default for AppState {
                 transport: Transport::default(),
                 scan_tx: None,
                 status: LibraryStatus::default(),
+                #[cfg(feature = "output")]
+                player: None,
             })),
         }
     }

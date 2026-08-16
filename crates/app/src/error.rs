@@ -47,3 +47,10 @@ impl From<mimir_core::db::DbError> for AppError {
         }
     }
 }
+
+#[cfg(feature = "output")]
+impl From<mimir_audio::PlayerError> for AppError {
+    fn from(e: mimir_audio::PlayerError) -> Self {
+        Self::Internal(format!("player: {e}"))
+    }
+}

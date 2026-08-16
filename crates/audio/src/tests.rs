@@ -1,10 +1,13 @@
 //! Tests for the audio decoder + transport.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::decode_file;
 use crate::transport::{PlaybackQueue, Transport, TransportCommand, TransportState};
+#[cfg(feature = "output")]
+use crate::{Player, PlayerCommand, PlayerSnapshot};
 
 /// Write a tiny mono 8kHz 16-bit PCM WAV file with `n` samples.
 #[allow(
@@ -176,7 +179,7 @@ fn output_lists_default_host() {
     // The CI runner may have no audio devices (sandbox blocks alsa/pipewire,
     // or libasound2-dev is missing). We only assert the *shape* of the
     // return type — both `Ok(empty Vec)` and `Err(_)` are accepted.
-    let result: Result<Vec<crate::output::OutputDeviceInfo>, cpal::HostUnavailable> =
+    let result: Result<Vec<crate::output::OutputDeviceInfo>, String> =
         crate::output::list_output_devices();
     match result {
         Ok(devices) => {
@@ -191,4 +194,151 @@ fn output_lists_default_host() {
             eprintln!("output device enumeration skipped: {e}");
         }
     }
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_new_starts_in_stopped_state() {
+    let p = Player::new();
+    assert_eq!(p.snapshot(), PlayerSnapshot::default());
+    assert_eq!(p.snapshot().state, TransportState::Stopped);
+    assert!(p.snapshot().current.is_none());
+}
+
+#[cfg(feature = "output")]
+fn write_tiny_wav(path: &Path, samples: u32) {
+    use std::io::Write;
+    let mut data = Vec::with_capacity(44 + (samples as usize) * 2);
+    let byte_rate = 8_000u32 * 2;
+    data.extend_from_slice(b"RIFF");
+    data.extend_from_slice(&(36u32 + samples * 2).to_le_bytes());
+    data.extend_from_slice(b"WAVE");
+    data.extend_from_slice(b"fmt ");
+    data.extend_from_slice(&16u32.to_le_bytes());
+    data.extend_from_slice(&1u16.to_le_bytes());
+    data.extend_from_slice(&1u16.to_le_bytes());
+    data.extend_from_slice(&8_000u32.to_le_bytes());
+    data.extend_from_slice(&byte_rate.to_le_bytes());
+    data.extend_from_slice(&2u16.to_le_bytes());
+    data.extend_from_slice(&16u16.to_le_bytes());
+    data.extend_from_slice(b"data");
+    data.extend_from_slice(&(samples * 2).to_le_bytes());
+    let mut f = std::fs::File::create(path).expect("create wav");
+    f.write_all(&data).expect("write header");
+    for _ in 0..samples {
+        let s = i16::MAX / 2;
+        f.write_all(&s.to_le_bytes()).expect("write sample");
+    }
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_play_command_transitions_to_playing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("sine.wav");
+    write_tiny_wav(&path, 200);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(path.clone())).expect("send");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        if s.state == TransportState::Playing && s.current == Some(path.clone()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "player never transitioned to Playing; got {s:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_pause_resume_stop_round_trip() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("sine.wav");
+    write_tiny_wav(&path, 200);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(path.clone())).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Playing);
+
+    h.send(PlayerCommand::Pause).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Paused);
+
+    h.send(PlayerCommand::Resume).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Playing);
+
+    h.send(PlayerCommand::Stop).expect("send");
+    wait_for(&p, |s| {
+        s.state == TransportState::Stopped && s.current.is_none()
+    });
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_play_missing_file_records_failure() {
+    let p = Player::new();
+    let h = p.handle();
+    let path = PathBuf::from("/tmp/does-not-exist.wav");
+    h.send(PlayerCommand::Play(path.clone())).expect("send");
+
+    // Decode fails: state should end up Stopped, with the path recorded.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        if s.state == TransportState::Stopped && s.current == Some(path.clone()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "decode failure path did not converge; got {s:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(feature = "output")]
+fn wait_for(p: &Player, mut pred: impl FnMut(&PlayerSnapshot) -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        if pred(&s) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "predicate never satisfied; got {s:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `play` followed by `stop` clears the snapshot — the next `play` should
+/// report a fresh `current`.
+#[cfg(feature = "output")]
+#[test]
+fn player_stop_clears_current_then_play_resets() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    write_tiny_wav(&a, 200);
+    write_tiny_wav(&b, 200);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(a.clone())).expect("send");
+    wait_for(&p, |s| s.current == Some(a.clone()));
+    h.send(PlayerCommand::Stop).expect("send");
+    wait_for(&p, |s| {
+        s.state == TransportState::Stopped && s.current.is_none()
+    });
+
+    h.send(PlayerCommand::Play(b.clone())).expect("send");
+    wait_for(&p, |s| s.current == Some(b.clone()));
 }
