@@ -13,3 +13,22 @@ workspace = true
 [[bin]]
 name = "mimir"
 path = "src/main.rs"
+
+[dependencies]
+mimir-core = { path = "../core" }
+mimir-audio = { path = "../audio" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+r2d2 = "0.8"
+tauri = { version = "2.0", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2.0", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+tauri = ["dep:tauri", "dep:tauri-build"]

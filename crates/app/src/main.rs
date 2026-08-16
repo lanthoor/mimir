@@ -1,8 +1,13 @@
 //! Mimir host binary.
 //!
-//! Phase 0 (CI Bootstrap) prints a version banner so the CI pipeline has a
-//! runnable artifact to produce. The real Tauri shell lands in Tier 0.
+//! Tier 0 ships a Tauri v2 shell with IPC commands for the Svelte frontend.
+//! The actual Tauri builder is wired in `lib.rs`; `main.rs` just calls it.
+
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
 fn main() {
-    println!("mimir {}", env!("CARGO_PKG_VERSION"));
+    mimir_app::run();
 }

@@ -1,9 +1,10 @@
 //! `artist` listing.
 
 use rusqlite::Connection;
+use serde::Serialize;
 
 /// An artist row as returned by the read-side query layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ArtistRow {
     pub id: i64,
     pub name: String,

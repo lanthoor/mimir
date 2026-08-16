@@ -30,7 +30,7 @@ pub enum TransportCommand {
 }
 
 /// Transport state + queue, updated by a stream of `TransportCommand`s.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Transport {
     pub state: TransportState,
     pub queue: PlaybackQueue,

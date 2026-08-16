@@ -1,0 +1,85 @@
+//! IPC commands invoked from the Svelte front-end.
+
+#[cfg(feature = "tauri")]
+use std::path::Path;
+
+#[cfg(feature = "tauri")]
+use mimir_audio::TransportCommand;
+#[cfg(feature = "tauri")]
+use mimir_core::query::TrackRow;
+
+#[cfg(feature = "tauri")]
+use crate::error::AppError;
+#[cfg(feature = "tauri")]
+use crate::state::AppState;
+
+/// Open (or create) the library database at `path`.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_open(state: tauri::State<'_, AppState>, path: String) -> Result<(), AppError> {
+    state.open_library(Path::new(&path))
+}
+
+/// Enqueue a folder for scanning. Returns the folder row id.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_add_folder(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<i64, AppError> {
+    state.add_folder(Path::new(&path))
+}
+
+/// Full-text search across the library. Returns matching tracks.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_search(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    limit: Option<i64>,
+) -> Result<Vec<TrackRow>, AppError> {
+    state.search(&query, limit.unwrap_or(50))
+}
+
+/// Start (or replace) playback with the given track id.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_play(state: tauri::State<'_, AppState>, track_id: i64) -> Result<(), AppError> {
+    state.send_transport(TransportCommand::Play(track_id));
+    Ok(())
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_pause(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    state.send_transport(TransportCommand::Pause);
+    Ok(())
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_resume(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    state.send_transport(TransportCommand::Resume);
+    Ok(())
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_stop(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    state.send_transport(TransportCommand::Stop);
+    Ok(())
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_next(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    state.send_transport(TransportCommand::Next);
+    Ok(())
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_previous(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    state.send_transport(TransportCommand::Previous);
+    Ok(())
+}
