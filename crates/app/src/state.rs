@@ -53,22 +53,36 @@ impl AppState {
         let state = Self::default();
         let path = default_library_path();
         if let Err(e) = state.open_library(&path) {
-            let mut inner = state.inner.lock().expect("state poisoned");
-            inner.status.path = Some(path);
-            inner.status.last_error = Some(e.to_string());
+            // `open_library` already updates the status on failure; this
+            // branch is here for documentation. Don't re-error.
+            let _ = e;
         }
         state
     }
 
-    /// Open (or create) the library at `path`. Idempotent. On success
-    /// the previous `last_error` is cleared.
+    /// Open (or create) the library at `path`. Idempotent.
+    ///
+    /// On success the previous `last_error` is cleared; on failure the
+    /// path is recorded as the attempted path, `last_error` captures the
+    /// message, and any previously-open library is closed. This makes the
+    /// state consistent: either the library at `status.path` is open, or
+    /// it's not.
     pub fn open_library(&self, path: &Path) -> Result<(), AppError> {
         let mut inner = self.inner.lock().expect("state poisoned");
-        let lib = Library::open(path)?;
-        inner.library = Some(lib);
         inner.status.path = Some(path.to_path_buf());
-        inner.status.last_error = None;
-        Ok(())
+        match Library::open(path) {
+            Ok(lib) => {
+                inner.library = Some(lib);
+                inner.status.last_error = None;
+                Ok(())
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                inner.library = None;
+                inner.status.last_error = Some(msg);
+                Err(AppError::from(e))
+            }
+        }
     }
 
     /// True when the library is open and queries can be run.
