@@ -5,11 +5,11 @@
 
 use std::path::Path;
 
-use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal};
+use symphonia::core::audio::{AudioBuffer, AudioBufferRef};
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymError;
 use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::probe::Hint;
 use thiserror::Error;
 
@@ -32,6 +32,8 @@ pub enum DecodeError {
     NoTracks,
     #[error("decode: {0}")]
     Decode(String),
+    #[error("too many channels: {0}")]
+    TooManyChannels(usize),
 }
 
 const fn unsupported(err: &SymError) -> bool {
@@ -44,7 +46,7 @@ const fn unsupported(err: &SymError) -> bool {
 /// 0's single-track-per-file assumption this is sufficient.
 pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
     let file = std::fs::File::open(path)?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mss = MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
 
     let probed = symphonia::default::get_probe()
         .format(
@@ -71,7 +73,12 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
 
     let track_id = track.id;
     let sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
-    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2) as u16;
+    let channel_count = track
+        .codec_params
+        .channels
+        .map_or(2, symphonia::core::audio::Channels::count);
+    let channels =
+        u16::try_from(channel_count).map_err(|_| DecodeError::TooManyChannels(channel_count))?;
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
@@ -101,10 +108,8 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
         }
 
         match decoder.decode(&packet) {
-            Ok(decoded) => {
-                interleave(&decoded, &mut samples);
-            }
-            Err(SymError::DecodeError(_)) | Err(SymError::ResetRequired) => {
+            Ok(audio) => interleave(&audio, &mut samples),
+            Err(SymError::DecodeError(_) | SymError::ResetRequired) => {
                 // Recoverable per-packet errors — skip.
             }
             Err(e) => return Err(DecodeError::Decode(e.to_string())),
@@ -125,10 +130,11 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
 fn interleave(buffer: &AudioBufferRef<'_>, out: &mut Vec<f32>) {
     let mut dst: AudioBuffer<f32> = buffer.make_equivalent();
     buffer.convert(&mut dst);
-    let frames = dst.frames();
     let plane_refs = dst.planes();
+    let planes = plane_refs.planes();
+    let frames = planes.first().map_or(0, |p| p.len());
     for frame_idx in 0..frames {
-        for plane in plane_refs.planes() {
+        for plane in planes {
             out.push(plane[frame_idx]);
         }
     }
