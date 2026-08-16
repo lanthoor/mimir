@@ -14,10 +14,16 @@ pub(crate) struct Migration {
 
 /// All migrations, oldest first. New entries go at the end and must bump
 /// the `version`.
-pub(crate) const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: include_str!("../../migrations/0001_base.sql"),
-}];
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: include_str!("../../migrations/0001_base.sql"),
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("../../migrations/0002_fts5_diacritics.sql"),
+    },
+];
 
 const SCHEMA_VERSION_DDL: &str = "CREATE TABLE IF NOT EXISTS schema_version (\
     version INTEGER PRIMARY KEY, \

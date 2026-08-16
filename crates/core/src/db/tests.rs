@@ -94,3 +94,36 @@ fn reopen_does_not_reapply_migrations() {
         "schema version must not change on reopen"
     );
 }
+
+#[test]
+fn fts5_matches_diacritics() {
+    let lib = Library::in_memory().expect("in-memory Library");
+    let conn = lib.conn().expect("conn");
+
+    // Seed an artist + album + track with a diacritic in the title.
+    conn.execute(
+        "INSERT INTO artist (id, name, sort_name) VALUES (1, 'Björk', 'Bjork')",
+        [],
+    )
+    .expect("insert artist");
+    conn.execute(
+        "INSERT INTO album (id, title, album_artist_id) VALUES (1, 'Homogénic', 1)",
+        [],
+    )
+    .expect("insert album");
+    conn.execute(
+        "INSERT INTO track (id, path, path_hash, mtime_ns, size_bytes, codec, title, album_id) \
+         VALUES (1, '/x.mp3', X'00', 0, 0, 'mp3', 'Jóga', 1)",
+        [],
+    )
+    .expect("insert track");
+
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM track_fts WHERE track_fts MATCH ?1",
+            ["Joga"],
+            |row| row.get(0),
+        )
+        .expect("query");
+    assert_eq!(count, 1, "diacritic-insensitive search must match Jóga");
+}
