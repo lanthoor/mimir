@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::decode_file;
-use crate::transport::{PlaybackQueue, TransportState};
+use crate::transport::{PlaybackQueue, Transport, TransportCommand, TransportState};
 
 /// Write a tiny mono 8kHz 16-bit PCM WAV file with `n` samples.
 #[allow(
@@ -117,4 +117,47 @@ fn queue_push_clear_and_next_prev() {
     q.clear();
     assert!(q.is_empty());
     assert_eq!(q.current(), None);
+}
+
+#[test]
+fn transport_dispatches_commands() {
+    let mut t = Transport::default();
+    assert_eq!(t.state, TransportState::Stopped);
+
+    t.dispatch(TransportCommand::Enqueue(10));
+    t.dispatch(TransportCommand::Enqueue(20));
+    t.dispatch(TransportCommand::Enqueue(30));
+    assert_eq!(t.queue.items(), &[10, 20, 30]);
+    assert_eq!(t.queue.current(), Some(10));
+
+    t.dispatch(TransportCommand::Play(10));
+    assert_eq!(t.state, TransportState::Playing);
+    assert_eq!(t.queue.current(), Some(10));
+
+    t.dispatch(TransportCommand::Pause);
+    assert_eq!(t.state, TransportState::Paused);
+
+    t.dispatch(TransportCommand::Resume);
+    assert_eq!(t.state, TransportState::Playing);
+
+    t.dispatch(TransportCommand::Next);
+    assert_eq!(t.queue.current(), Some(20));
+
+    t.dispatch(TransportCommand::Previous);
+    assert_eq!(t.queue.current(), Some(10));
+
+    t.dispatch(TransportCommand::ClearQueue);
+    assert!(t.queue.is_empty());
+    assert_eq!(t.state, TransportState::Stopped, "clear also stops");
+}
+
+#[test]
+fn transport_play_replaces_queue_with_single_track() {
+    let mut t = Transport::default();
+    t.dispatch(TransportCommand::Enqueue(10));
+    t.dispatch(TransportCommand::Enqueue(20));
+    t.dispatch(TransportCommand::Play(99));
+    assert_eq!(t.queue.items(), &[99]);
+    assert_eq!(t.queue.current(), Some(99));
+    assert_eq!(t.state, TransportState::Playing);
 }
