@@ -173,13 +173,19 @@ fn transport_play_replaces_queue_with_single_track() {
 #[test]
 #[cfg(feature = "output")]
 fn output_lists_default_host() {
-    // cpal on the CI runner may have no audio devices. We treat "no host"
-    // as a successful enumeration (an empty list), but skip outright
-    // failures since some sandboxes block the alsa/pipewire backends.
-    match crate::output::list_output_devices() {
+    // The CI runner may have no audio devices (sandbox blocks alsa/pipewire,
+    // or libasound2-dev is missing). We only assert the *shape* of the
+    // return type — both `Ok(empty Vec)` and `Err(_)` are accepted.
+    let result: Result<Vec<crate::output::OutputDeviceInfo>, cpal::HostUnavailable> =
+        crate::output::list_output_devices();
+    match result {
         Ok(devices) => {
-            // OK: zero or more devices.
-            let _ = devices;
+            // The default marker should be set on at most one device, and
+            // only when the list is non-empty.
+            let defaults = devices.iter().filter(|d| d.is_default).count();
+            if !devices.is_empty() {
+                assert!(defaults <= 1, "at most one device can be default");
+            }
         }
         Err(e) => {
             eprintln!("output device enumeration skipped: {e}");
