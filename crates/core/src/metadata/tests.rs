@@ -3,7 +3,10 @@
 use std::fs;
 
 use crate::db::Library;
-use crate::metadata::{extract_tags, parse_filename, probe_file, upsert_album, upsert_artist, HeuristicTags, Tags};
+use crate::metadata::{
+    extract_tags, ingest, parse_filename, probe_file, upsert_album, upsert_artist, HeuristicTags, Tags,
+};
+use crate::scanner::ScanJob;
 
 fn minimal_mp3() -> Vec<u8> {
     // A minimal valid MPEG audio frame is enough for `lofty` to recognize
@@ -125,4 +128,59 @@ fn upsert_album_is_idempotent_and_respects_album_artist() {
         .query_row("SELECT COUNT(*) FROM album", [], |row| row.get(0))
         .expect("count");
     assert_eq!(count, 2);
+}
+
+#[test]
+fn ingest_writes_artist_album_and_track_in_one_tx() {
+    use std::fs;
+
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    // Stand up a folder row first (we don't run scan_root here).
+    let folder_id = crate::scanner::upsert_folder(&conn, "/music").expect("folder");
+
+    // A real file with no tags so the heuristic fallback kicks in.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let artist_dir = dir.path().join("Björk");
+    let album_dir = artist_dir.join("Homogénic");
+    fs::create_dir_all(&album_dir).expect("mkdir");
+    let track = album_dir.join("05 - Hunter.mp3");
+    fs::write(&track, b"fake bytes").expect("write");
+
+    let file_hash = crate::scanner::hash_file(&track).expect("hash");
+    let job = ScanJob {
+        folder_id,
+        path: track.clone(),
+        file_hash,
+    };
+
+    let track_id = ingest(&conn, job).expect("ingest");
+
+    // Artist + album + track rows exist.
+    let artist_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM artist", [], |row| row.get(0))
+        .expect("artist count");
+    assert_eq!(artist_count, 1, "one artist (Björk) should be upserted");
+
+    let album_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM album", [], |row| row.get(0))
+        .expect("album count");
+    assert_eq!(album_count, 1);
+
+    let track_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM track", [], |row| row.get(0))
+        .expect("track count");
+    assert_eq!(track_count, 1);
+    assert!(track_id > 0);
+
+    // FTS picks up the title.
+    let hit: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM track_fts WHERE track_fts MATCH ?1",
+            ["hunter"],
+            |row| row.get(0),
+        )
+        .expect("fts");
+    assert_eq!(hit, 1);
 }
