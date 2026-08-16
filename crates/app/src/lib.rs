@@ -21,6 +21,7 @@ pub fn run() {
         .manage(state::AppState::new())
         .invoke_handler(tauri::generate_handler![
             command::library_open,
+            command::library_status,
             command::library_add_folder,
             command::library_search,
             command::audio_play,

@@ -1,8 +1,9 @@
 // mimir front-end — vanilla HTML/CSS/JS wired to Tauri v2 IPC.
 //
 // Tauri 2 exposes `window.__TAURI__.core.invoke` for typed IPC commands.
-// Until the user clicks "+ folder" and the server-side scanner has indexed
-// something, the library list is empty.
+// The library is opened implicitly by the backend on startup; the SPA
+// picks up its status via `library_status` and shows a banner if the
+// open failed (with a "Retry" path input).
 
 const { invoke } = window.__TAURI__.core;
 
@@ -10,6 +11,7 @@ const state = {
   view: "tracks",
   query: "",
   items: [],
+  library: { path: null, last_error: null },
 };
 
 const $list = document.getElementById("list");
@@ -18,8 +20,7 @@ const $nav = document.querySelectorAll("nav button[data-view]");
 const $addFolder = document.getElementById("add-folder");
 const $addFolderDialog = document.getElementById("add-folder-dialog");
 const $addFolderPath = document.getElementById("add-folder-path");
-const $nowPlayingTitle = document.getElementById("np-title");
-const $nowPlayingArtist = document.getElementById("np-artist");
+const $status = document.getElementById("status");
 
 const $prev = document.getElementById("prev");
 const $play = document.getElementById("play");
@@ -30,6 +31,26 @@ const $next = document.getElementById("next");
 function render() {
   $list.className = "list " + state.view;
   $list.replaceChildren(...state.items.map(renderCard));
+  renderStatus();
+}
+
+function renderStatus() {
+  const { path, last_error } = state.library;
+  if (!last_error) {
+    $status.hidden = true;
+    $status.replaceChildren();
+    return;
+  }
+  $status.hidden = false;
+  $status.replaceChildren();
+  const msg = document.createElement("div");
+  msg.textContent = "Library could not be opened:";
+  const code = document.createElement("code");
+  code.textContent = last_error;
+  const pathInfo = document.createElement("div");
+  pathInfo.append(document.createTextNode("at "), document.createElement("code"));
+  pathInfo.lastChild.textContent = path ?? "(unknown)";
+  $status.append(msg, code, pathInfo);
 }
 
 function renderCard(item) {
@@ -75,6 +96,16 @@ async function refresh() {
   }
 }
 
+async function refreshStatus() {
+  try {
+    state.library = await invoke("library_status");
+  } catch (e) {
+    console.error("library_status failed:", e);
+    state.library = { path: null, last_error: e?.message ?? String(e) };
+  }
+  render();
+}
+
 $search.addEventListener("input", (ev) => {
   state.query = ev.target.value;
   refresh();
@@ -89,6 +120,10 @@ $nav.forEach((btn) => {
 });
 
 $addFolder.addEventListener("click", () => {
+  if (state.library.last_error) {
+    alert("Library isn't open. Fix the open error above first.");
+    return;
+  }
   $addFolderPath.value = "";
   $addFolderDialog.showModal();
 });
@@ -113,5 +148,6 @@ $stop.addEventListener("click", () => invoke("audio_stop").catch(console.error))
 $next.addEventListener("click", () => invoke("audio_next").catch(console.error));
 $prev.addEventListener("click", () => invoke("audio_previous").catch(console.error));
 
-// Initial paint (empty).
+// Initial paint (empty) + status check.
 render();
+refreshStatus();

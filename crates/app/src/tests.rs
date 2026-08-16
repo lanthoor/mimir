@@ -23,13 +23,6 @@ fn open_library_creates_db_file() {
 }
 
 #[test]
-fn search_before_open_returns_error() {
-    let state = AppState::new();
-    let err = state.search("foo", 10).expect_err("should error");
-    assert!(matches!(err, AppError::Internal(_)));
-}
-
-#[test]
 fn app_state_implicitly_opens_default_library() {
     // `AppState::new()` must open the library at the user's default data
     // location so the SPA can call `library_add_folder` immediately on
@@ -52,8 +45,14 @@ fn open_library_records_failure_on_status() {
     let err = state.open_library(&bad).expect_err("open should fail");
     let status = state.library_status();
     assert!(status.last_error.is_some(), "failure must be recorded");
-    assert!(status.path.is_some(), "path should still be set to the attempt");
-    assert!(!state.is_open(), "library must remain closed after failed open");
+    assert!(
+        status.path.is_some(),
+        "path should still be set to the attempt"
+    );
+    assert!(
+        !state.is_open(),
+        "library must remain closed after failed open"
+    );
     // The exact error variant depends on which layer rejected the path
     // (InvalidInput at the OS layer, Sqlite at the SQLite layer, or our
     // own `Internal` for connection-pool failures). Accept any of them —
