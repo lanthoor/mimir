@@ -36,10 +36,10 @@ Each tier after S0 deepens one axis; nothing cross-cuts until a tier lands.
   - `crates/core/` — `lib.rs` exposing `pub fn hello() -> &'static str { "core" }`.
   - `crates/audio/` — same pattern.
   - `crates/app/` — `[[bin]]` with `main.rs` printing a version string from `env!("CARGO_PKG_VERSION")`.
-  - Top-level `.gitignore` (Rust template) + `rust-toolchain.toml` pinning a stable toolchain.
+  - Top-level `.gitignore` (Rust template) + `rust-toolchain.toml` pinning a specific stable Rust version (currently `1.97.1`, kept in sync with `[workspace.package].rust-version`).
 - **Workflows under `.github/workflows/`:**
-  - `pr.yml` — trigger: `pull_request` to `main`. Jobs: `fmt`, `clippy`, `test`, `build` (each a separate required status check). Concurrency group `pr-${{ github.event.pull_request.number }}`, `cancel-in-progress: true`. Permissions: `contents: read`.
-  - `ci.yml` — triggers: `push` to `main`, `workflow_dispatch`. Runs the same checks, then `cargo build --release --bin mimir`, `strip` the binary, `actions/upload-artifact@v4` with `name: mimir-linux-x86_64`, `path: target/release/mimir`, `retention-days: 1`. Concurrency group `ci-main`, `cancel-in-progress: false`. Permissions: `contents: read`.
+  - `pr.yml` — trigger: `pull_request` to `main`. Jobs: `fmt`, `clippy`, `test`, `build` (each a separate required status check). Concurrency group `pr-${{ github.event.pull_request.number }}`, `cancel-in-progress: true`. Permissions: `contents: read`. All third-party actions pinned by commit SHA with the tag in an inline comment; `dtolnay/rust-toolchain` receives an explicit `toolchain:` matching `rust-toolchain.toml`.
+  - `ci.yml` — triggers: `push` to `main`, `workflow_dispatch`. Runs the same checks, then `cargo build --release --bin mimir`, `strip` the binary, `actions/upload-artifact` with `name: mimir-linux-x86_64`, `path: target/release/mimir`, `retention-days: 1`. Concurrency group `ci-main`, `cancel-in-progress: false`. Permissions: `contents: read`. Same action-pinning rules as `pr.yml`.
   - Both jobs pinned to `ubuntu-latest` only.
 - **Branch protection:**
   - Require the four `pr.yml` checks (`fmt`, `clippy`, `test`, `build`) as required status checks on `main`.
