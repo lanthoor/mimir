@@ -124,6 +124,7 @@ fn transport_dispatches_commands() {
     let mut t = Transport::default();
     assert_eq!(t.state, TransportState::Stopped);
 
+    // Build a queue first, then play.
     t.dispatch(TransportCommand::Enqueue(10));
     t.dispatch(TransportCommand::Enqueue(20));
     t.dispatch(TransportCommand::Enqueue(30));
@@ -131,8 +132,15 @@ fn transport_dispatches_commands() {
     assert_eq!(t.queue.current(), Some(10));
 
     t.dispatch(TransportCommand::Play(10));
-    assert_eq!(t.state, TransportState::Playing);
+    // Play replaces the queue with [10].
+    assert_eq!(t.queue.items(), &[10]);
     assert_eq!(t.queue.current(), Some(10));
+    assert_eq!(t.state, TransportState::Playing);
+
+    // Now extend the queue from the playing position.
+    t.dispatch(TransportCommand::Enqueue(20));
+    t.dispatch(TransportCommand::Enqueue(30));
+    assert_eq!(t.queue.items(), &[10, 20, 30]);
 
     t.dispatch(TransportCommand::Pause);
     assert_eq!(t.state, TransportState::Paused);
