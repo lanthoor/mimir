@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use crate::metadata::probe_file;
+use crate::metadata::{extract_tags, probe_file, Tags};
 
 fn minimal_mp3() -> Vec<u8> {
     // A minimal valid MPEG audio frame is enough for `lofty` to recognize
@@ -46,4 +46,15 @@ fn probe_rejects_unknown_extension() {
     let p = dir.path().join("data.xyz");
     fs::write(&p, b"junk").expect("write");
     assert!(probe_file(&p).is_err());
+}
+
+#[test]
+fn extract_tags_handles_missing_tag_gracefully() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p = dir.path().join("silent.mp3");
+    fs::write(&p, minimal_mp3()).expect("write");
+
+    // No embedded tags — should not error, just return mostly-None.
+    let tags = extract_tags(&p).expect("extract");
+    assert!(matches!(tags, Tags { .. }));
 }
