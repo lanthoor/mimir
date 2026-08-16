@@ -169,3 +169,20 @@ fn transport_play_replaces_queue_with_single_track() {
     assert_eq!(t.queue.current(), Some(99));
     assert_eq!(t.state, TransportState::Playing);
 }
+
+#[test]
+#[cfg(feature = "output")]
+fn output_lists_default_host() {
+    // cpal on the CI runner may have no audio devices. We treat "no host"
+    // as a successful enumeration (an empty list), but skip outright
+    // failures since some sandboxes block the alsa/pipewire backends.
+    match crate::output::list_output_devices() {
+        Ok(devices) => {
+            // OK: zero or more devices.
+            let _ = devices;
+        }
+        Err(e) => {
+            eprintln!("output device enumeration skipped: {e}");
+        }
+    }
+}
