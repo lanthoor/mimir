@@ -4,7 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use crate::decode_file;
-use crate::transport::{PlaybackQueue, Transport, TransportCommand, TransportState};
+use crate::transport::{PlaybackQueue, Transport, TransportState, TransportCommand};
+#[cfg(feature = "output")]
+use crate::{Player, PlayerCommand, PlayerSnapshot};
 
 /// Write a tiny mono 8kHz 16-bit PCM WAV file with `n` samples.
 #[allow(
@@ -176,7 +178,7 @@ fn output_lists_default_host() {
     // The CI runner may have no audio devices (sandbox blocks alsa/pipewire,
     // or libasound2-dev is missing). We only assert the *shape* of the
     // return type — both `Ok(empty Vec)` and `Err(_)` are accepted.
-    let result: Result<Vec<crate::output::OutputDeviceInfo>, cpal::HostUnavailable> =
+    let result: Result<Vec<crate::output::OutputDeviceInfo>, String> =
         crate::output::list_output_devices();
     match result {
         Ok(devices) => {
@@ -191,4 +193,13 @@ fn output_lists_default_host() {
             eprintln!("output device enumeration skipped: {e}");
         }
     }
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_new_starts_in_stopped_state() {
+    let p = Player::new();
+    assert_eq!(p.snapshot(), PlayerSnapshot::default());
+    assert_eq!(p.snapshot().state, TransportState::Stopped);
+    assert!(p.snapshot().current.is_none());
 }
