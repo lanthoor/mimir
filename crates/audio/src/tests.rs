@@ -205,15 +205,43 @@ fn player_new_starts_in_stopped_state() {
 }
 
 #[cfg(feature = "output")]
+fn write_tiny_wav(path: &Path, samples: u32) {
+    use std::io::Write;
+    let mut data = Vec::with_capacity(44 + (samples as usize) * 2);
+    let byte_rate = 8_000u32 * 2;
+    data.extend_from_slice(b"RIFF");
+    data.extend_from_slice(&(36u32 + samples * 2).to_le_bytes());
+    data.extend_from_slice(b"WAVE");
+    data.extend_from_slice(b"fmt ");
+    data.extend_from_slice(&16u32.to_le_bytes());
+    data.extend_from_slice(&1u16.to_le_bytes());
+    data.extend_from_slice(&1u16.to_le_bytes());
+    data.extend_from_slice(&8_000u32.to_le_bytes());
+    data.extend_from_slice(&byte_rate.to_le_bytes());
+    data.extend_from_slice(&2u16.to_le_bytes());
+    data.extend_from_slice(&16u16.to_le_bytes());
+    data.extend_from_slice(b"data");
+    data.extend_from_slice(&(samples * 2).to_le_bytes());
+    let mut f = std::fs::File::create(path).expect("create wav");
+    f.write_all(&data).expect("write header");
+    for i in 0..samples {
+        let s = (i16::MAX / 2) as i16;
+        f.write_all(&s.to_le_bytes()).expect("write sample");
+    }
+}
+
+#[cfg(feature = "output")]
 #[test]
 fn player_play_command_transitions_to_playing() {
     use std::time::Duration;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("sine.wav");
+    write_tiny_wav(&path, 200);
+
     let p = Player::new();
     let h = p.handle();
-    let path = PathBuf::from("/tmp/fake-track.mp3");
     h.send(PlayerCommand::Play(path.clone())).expect("send");
 
-    // The worker thread is independent; poll for the state change.
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
         let s = p.snapshot();
@@ -231,9 +259,13 @@ fn player_play_command_transitions_to_playing() {
 #[test]
 fn player_pause_resume_stop_round_trip() {
     use std::time::Duration;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("sine.wav");
+    write_tiny_wav(&path, 200);
+
     let p = Player::new();
     let h = p.handle();
-    h.send(PlayerCommand::Play(PathBuf::from("/tmp/x.mp3"))).expect("send");
+    h.send(PlayerCommand::Play(path.clone())).expect("send");
     wait_for(&p, |s| s.state == TransportState::Playing);
 
     h.send(PlayerCommand::Pause).expect("send");
@@ -243,7 +275,30 @@ fn player_pause_resume_stop_round_trip() {
     wait_for(&p, |s| s.state == TransportState::Playing);
 
     h.send(PlayerCommand::Stop).expect("send");
-    wait_for(&p, |s| s.state == TransportState::Stopped);
+    wait_for(&p, |s| s.state == TransportState::Stopped && s.current.is_none());
+}
+
+#[cfg(feature = "output")]
+#[test]
+fn player_play_missing_file_records_failure() {
+    use std::time::Duration;
+    let p = Player::new();
+    let h = p.handle();
+    let path = PathBuf::from("/tmp/does-not-exist.wav");
+    h.send(PlayerCommand::Play(path.clone())).expect("send");
+
+    // Decode fails: state should end up Stopped, with the path recorded.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        if s.state == TransportState::Stopped && s.current == Some(path.clone()) {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("decode failure path did not converge; got {s:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[cfg(feature = "output")]
@@ -268,23 +323,19 @@ fn wait_for(p: &Player, mut pred: impl FnMut(&PlayerSnapshot) -> bool) {
 #[test]
 fn player_stop_clears_current_then_play_resets() {
     use std::time::Duration;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    write_tiny_wav(&a, 200);
+    write_tiny_wav(&b, 200);
+
     let p = Player::new();
     let h = p.handle();
-    h.send(PlayerCommand::Play(PathBuf::from("/tmp/a.mp3"))).expect("send");
-    wait_for(&p, |s| s.current.is_some());
+    h.send(PlayerCommand::Play(a.clone())).expect("send");
+    wait_for(&p, |s| s.current == Some(a.clone()));
     h.send(PlayerCommand::Stop).expect("send");
     wait_for(&p, |s| s.state == TransportState::Stopped && s.current.is_none());
 
-    h.send(PlayerCommand::Play(PathBuf::from("/tmp/b.mp3"))).expect("send");
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        let s = p.snapshot();
-        if s.current.as_deref() == Some(std::path::Path::new("/tmp/b.mp3")) {
-            break;
-        }
-        if std::time::Instant::now() > deadline {
-            panic!("current never updated to /tmp/b.mp3; got {s:?}");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    h.send(PlayerCommand::Play(b.clone())).expect("send");
+    wait_for(&p, |s| s.current == Some(b.clone()));
 }
