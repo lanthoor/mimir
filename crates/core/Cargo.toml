@@ -1,0 +1,11 @@
+[package]
+name = "mimir-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Mimir core: library model, ingestion, metadata, DB."
+
+[lints]
+workspace = true

@@ -25,6 +25,41 @@ Each tier after S0 deepens one axis; nothing cross-cuts until a tier lands.
 
 ---
 
+## Phase 0 — CI Bootstrap
+
+**Goal:** green pipeline gates on a minimal Rust-only skeleton before any product code lands.
+
+### Scope
+
+- **Repo scaffold (pure Cargo, no Tauri yet):**
+  - `Cargo.toml` — virtual workspace, `resolver = "2"`.
+  - `crates/core/` — `lib.rs` exposing `pub fn hello() -> &'static str { "core" }`.
+  - `crates/audio/` — same pattern.
+  - `crates/app/` — `[[bin]]` with `main.rs` printing a version string from `env!("CARGO_PKG_VERSION")`.
+  - Top-level `.gitignore` (Rust template) + `rust-toolchain.toml` pinning a stable toolchain.
+- **Workflows under `.github/workflows/`:**
+  - `pr.yml` — trigger: `pull_request` to `main`. Jobs: `fmt`, `clippy`, `test`, `build` (each a separate required status check). Concurrency group `pr-${{ github.event.pull_request.number }}`, `cancel-in-progress: true`. Permissions: `contents: read`.
+  - `ci.yml` — triggers: `push` to `main`, `workflow_dispatch`. Runs the same checks, then `cargo build --release --bin mimir`, `strip` the binary, `actions/upload-artifact@v4` with `name: mimir-linux-x86_64`, `path: target/release/mimir`, `retention-days: 1`. Concurrency group `ci-main`, `cancel-in-progress: false`. Permissions: `contents: read`.
+  - Both jobs pinned to `ubuntu-latest` only.
+- **Branch protection:**
+  - Require the four `pr.yml` checks (`fmt`, `clippy`, `test`, `build`) as required status checks on `main`.
+  - Restrict dismiss/stale review to repo admins; no push (incl. force) except admins.
+
+### Out of scope (deferred)
+
+- Tauri shell + frontend, AppImage/.deb, MSI/.dmg.
+- Windows + macOS runners.
+- Signing, notarization, auto-update, release tags.
+- Reproducible builds, Flatpak.
+
+### Definition of done
+
+- Open a PR → all four `pr.yml` jobs green; stale runs auto-cancel.
+- Push to `main` → `ci.yml` produces a `mimir-linux-x86_64` artifact; previous artifacts auto-pruned within 24h.
+- Branch protection on `main` enforces the four required checks.
+
+---
+
 ## Tier 0 — Walking-skeleton MVP (S0)
 
 **Goal:** a working desktop app that ingests, indexes, browses, and plays.
@@ -121,7 +156,7 @@ Each tier after S0 deepens one axis; nothing cross-cuts until a tier lands.
 - Backup/restore library.
 - Network / no-network mode toggle.
 - Background jobs rate limits + backoff.
-- CI matrix: Win / macOS (universal) / Linux (AppImage, .deb, Flatpak).
+- Multi-OS CI matrix + bundling — see [Phase 0 — CI Bootstrap](#phase-0--ci-bootstrap) for the initial Linux-only pipeline; matrix expansion and per-OS bundling land in Tier 6.
 - Reproducible builds.
 
 ---

@@ -560,3 +560,5 @@ flowchart LR
 - name: Build (ubuntu-latest)
   run: cargo tauri build --target x86_64-unknown-linux-gnu
 ```
+
+> **Phase 0 status:** the pipeline currently ships a Linux-only `cargo build --release` artifact from a pure Cargo workspace skeleton (no Tauri yet). See [Plan · Phase 0 — CI Bootstrap](Plan.md#phase-0--ci-bootstrap). The full Tauri matrix (AppImage / .deb / Flatpak / MSI / .dmg) and signing/notarization are deferred to Tier 6.

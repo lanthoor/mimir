@@ -1,0 +1,19 @@
+[package]
+name = "mimir-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Mimir host binary (Tauri shell in Tier 0)."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mimir"
+path = "src/main.rs"
+
+[dependencies]
+mimir-core = { path = "../core" }
+mimir-audio = { path = "../audio" }
