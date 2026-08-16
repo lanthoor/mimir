@@ -1,8 +1,8 @@
 //! Tests for the file watcher.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::watcher::{EventKind, IngestEvent};
+use crate::watcher::{is_audio_path, EventKind, IngestEvent};
 
 #[test]
 fn ingest_event_carries_path_and_kind() {
@@ -27,4 +27,26 @@ fn ingest_event_carries_path_and_kind() {
             to: PathBuf::from("/music/b.flac"),
         }
     );
+}
+
+#[test]
+fn is_audio_path_accepts_supported_extensions() {
+    for ext in ["mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff", "alac"] {
+        let p = Path::new(&format!("/x/song.{ext}"));
+        assert!(is_audio_path(p), "{ext} should be audio");
+    }
+}
+
+#[test]
+fn is_audio_path_rejects_other_files() {
+    for name in ["cover.jpg", "notes.txt", "AlbumArt.jpg", "track.mp3.bak", ".DS_Store", ""] {
+        let p = Path::new(name);
+        assert!(!is_audio_path(p), "{name} should not be audio");
+    }
+}
+
+#[test]
+fn is_audio_path_is_case_insensitive() {
+    assert!(is_audio_path(Path::new("/x/Song.MP3")));
+    assert!(is_audio_path(Path::new("/x/Song.Flac")));
 }
