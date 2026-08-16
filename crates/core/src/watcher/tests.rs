@@ -31,7 +31,9 @@ fn ingest_event_carries_path_and_kind() {
 
 #[test]
 fn is_audio_path_accepts_supported_extensions() {
-    for ext in ["mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff", "alac"] {
+    for ext in [
+        "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", "aiff", "alac",
+    ] {
         let path = format!("/x/song.{ext}");
         assert!(is_audio_path(Path::new(&path)), "{ext} should be audio");
     }
@@ -39,7 +41,14 @@ fn is_audio_path_accepts_supported_extensions() {
 
 #[test]
 fn is_audio_path_rejects_other_files() {
-    for name in ["cover.jpg", "notes.txt", "AlbumArt.jpg", "track.mp3.bak", ".DS_Store", ""] {
+    for name in [
+        "cover.jpg",
+        "notes.txt",
+        "AlbumArt.jpg",
+        "track.mp3.bak",
+        ".DS_Store",
+        "",
+    ] {
         let p = Path::new(name);
         assert!(!is_audio_path(p), "{name} should not be audio");
     }
@@ -53,7 +62,7 @@ fn is_audio_path_is_case_insensitive() {
 
 #[test]
 fn to_ingest_maps_create_and_modify() {
-    use notify::event::{ModifyKind, EventKind as NEvent};
+    use notify::event::{EventKind as NEvent, ModifyKind};
 
     let ev = notify::Event {
         kind: NEvent::Create(notify::event::CreateKind::File),
@@ -119,8 +128,7 @@ fn spawn_watcher_emits_created_for_new_audio_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (tx, rx) = mpsc::channel();
 
-    let handle = crate::watcher::spawn_watcher(dir.path().to_path_buf(), tx)
-        .expect("spawn_watcher");
+    let handle = crate::watcher::spawn_watcher(dir.path(), tx).expect("spawn_watcher");
 
     // Give the debouncer + backend a moment to subscribe.
     std::thread::sleep(Duration::from_millis(300));
