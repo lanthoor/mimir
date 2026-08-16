@@ -11,13 +11,24 @@ use mimir_core::query::TrackRow;
 #[cfg(feature = "tauri")]
 use crate::error::AppError;
 #[cfg(feature = "tauri")]
-use crate::state::AppState;
+use crate::state::{AppState, LibraryStatus};
 
 /// Open (or create) the library database at `path`.
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn library_open(state: tauri::State<'_, AppState>, path: String) -> Result<(), AppError> {
     state.open_library(Path::new(&path))
+}
+
+/// Snapshot of the library state for the front-end.
+///
+/// The library is now opened implicitly by `AppState::new()` at the user's
+/// default data location. The SPA calls this on startup to detect open
+/// failures (a banner tells the user) and recover by re-opening.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_status(state: tauri::State<'_, AppState>) -> LibraryStatus {
+    state.library_status()
 }
 
 /// Enqueue a folder for scanning. Returns the folder row id.
