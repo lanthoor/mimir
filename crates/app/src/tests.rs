@@ -175,3 +175,19 @@ fn album_cover_returns_bytes_when_attached() {
         data,
     };
 }
+
+#[test]
+fn list_albums_returns_inserted_album() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    let artist_id = upsert_artist(&conn, "Björk").expect("artist");
+    upsert_album(&conn, "Homogénic", artist_id, Some(1997)).expect("album");
+
+    let rows = state.list_albums(100, 0).expect("list");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Homogénic");
+    assert_eq!(rows[0].year, Some(1997));
+}

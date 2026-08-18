@@ -12,6 +12,9 @@ const state = {
   query: "",
   items: [],
   library: { path: null, last_error: null },
+  // album_id → data: URL string (or "" when no cover). Cached so the
+  // WebView doesn't re-fetch on every render.
+  covers: {},
 };
 
 const $list = document.getElementById("list");
@@ -70,6 +73,14 @@ function renderCard(item) {
     title.textContent = item.title;
     subtitle.textContent =
       [item.artist_name, item.track_count + " tracks"].filter(Boolean).join(" — ");
+    const cover = state.covers[item.id];
+    if (cover) {
+      const img = document.createElement("img");
+      img.className = "cover";
+      img.alt = "";
+      img.src = cover;
+      card.append(img);
+    }
   } else {
     title.textContent = item.name;
     subtitle.textContent = "";
@@ -86,8 +97,27 @@ async function refresh() {
         query: state.query,
         limit: 100,
       });
+    } else if (state.view === "albums") {
+      const albums = await invoke("library_list_albums", { limit: 200, offset: 0 });
+      state.items = albums;
+      // Fetch covers in parallel; cache by album.id, render after.
+      const missing = albums.filter((a) => !(a.id in state.covers));
+      await Promise.all(
+        missing.map(async (a) => {
+          const resp = await invoke("library_album_cover", { albumId: a.id });
+          if (resp) {
+            const [mime, bytes] = resp;
+            const bytesArray = Array.isArray(bytes) ? new Uint8Array(bytes) : new Uint8Array();
+            let binary = "";
+            for (let i = 0; i < bytesArray.length; i++) binary += String.fromCharCode(bytesArray[i]);
+            state.covers[a.id] = `data:${mime};base64,${btoa(binary)}`;
+          } else {
+            state.covers[a.id] = "";
+          }
+        }),
+      );
     } else {
-      // Albums / artists are not yet exposed via IPC; show empty state.
+      // Artists are not yet exposed via IPC; show empty state.
       state.items = [];
     }
     render();

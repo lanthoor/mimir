@@ -168,6 +168,17 @@ impl AppState {
         Ok(row.map(|c| (c.mime_type, c.data)))
     }
 
+    /// Paged list of albums.
+    pub fn list_albums(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::AlbumRow>, AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        Ok(mimir_core::query::list_albums(&conn, limit, offset)?)
+    }
+
     pub fn transport(&self) -> Transport {
         self.inner.lock().expect("state poisoned").transport.clone()
     }

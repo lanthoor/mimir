@@ -6,7 +6,7 @@ use std::path::Path;
 #[cfg(feature = "tauri")]
 use mimir_audio::TransportCommand;
 #[cfg(feature = "tauri")]
-use mimir_core::query::TrackRow;
+use mimir_core::query::{AlbumRow, TrackRow};
 
 #[cfg(feature = "tauri")]
 use crate::error::AppError;
@@ -61,6 +61,17 @@ pub fn library_album_cover(
     album_id: i64,
 ) -> Result<Option<(String, Vec<u8>)>, AppError> {
     state.album_cover(album_id)
+}
+
+/// Paged list of albums.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_albums(
+    state: tauri::State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<AlbumRow>, AppError> {
+    state.list_albums(limit.unwrap_or(100), offset.unwrap_or(0))
 }
 
 /// Start (or replace) playback with the given track id.
