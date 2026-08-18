@@ -15,6 +15,9 @@ const state = {
   // album_id → data: URL string (or "" when no cover). Cached so the
   // WebView doesn't re-fetch on every render.
   covers: {},
+  // Active facet filters when in 'tracks' view. Any non-null value narrows
+  // the listing via library_query_tracks.
+  filter: { genre: null, year: null, artistId: null, albumId: null },
 };
 
 const $list = document.getElementById("list");
@@ -35,6 +38,30 @@ function render() {
   $list.className = "list " + state.view;
   $list.replaceChildren(...state.items.map(renderCard));
   renderStatus();
+  renderFilterChips();
+}
+
+function renderFilterChips() {
+  const $bar = document.getElementById("filter-bar");
+  if (!$bar) return;
+  $bar.replaceChildren();
+  const active = Object.entries(state.filter).filter(([, v]) => v != null);
+  if (state.view !== "tracks" || active.length === 0) {
+    $bar.hidden = true;
+    return;
+  }
+  $bar.hidden = false;
+  for (const [key, value] of active) {
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.type = "button";
+    chip.textContent = `${key}=${value} ✕`;
+    chip.addEventListener("click", () => {
+      state.filter[key] = null;
+      refresh();
+    });
+    $bar.append(chip);
+  }
 }
 
 function renderStatus() {
@@ -84,9 +111,21 @@ function renderCard(item) {
   } else if (state.view === "genres") {
     title.textContent = item.name;
     subtitle.textContent = `${item.track_count} tracks`;
+    card.addEventListener("click", () => {
+      state.filter = { genre: item.name, year: null, artistId: null, albumId: null };
+      state.view = "tracks";
+      $nav.forEach((b) => b.classList.toggle("active", b.dataset.view === "tracks"));
+      refresh();
+    });
   } else if (state.view === "years") {
     title.textContent = String(item.year);
     subtitle.textContent = `${item.track_count} tracks`;
+    card.addEventListener("click", () => {
+      state.filter = { genre: null, year: item.year, artistId: null, albumId: null };
+      state.view = "tracks";
+      $nav.forEach((b) => b.classList.toggle("active", b.dataset.view === "tracks"));
+      refresh();
+    });
   } else {
     title.textContent = item.name;
     subtitle.textContent = "";
@@ -99,10 +138,21 @@ function renderCard(item) {
 async function refresh() {
   try {
     if (state.view === "tracks") {
-      state.items = await invoke("library_search", {
-        query: state.query,
-        limit: 100,
-      });
+      const hasFilter =
+        Object.values(state.filter).some((v) => v != null);
+      state.items = hasFilter
+        ? await invoke("library_query_tracks", {
+            genre: state.filter.genre,
+            year: state.filter.year,
+            artistId: state.filter.artistId,
+            albumId: state.filter.albumId,
+            limit: 100,
+            offset: 0,
+          })
+        : await invoke("library_search", {
+            query: state.query,
+            limit: 100,
+          });
     } else if (state.view === "albums") {
       const albums = await invoke("library_list_albums", { limit: 200, offset: 0 });
       state.items = albums;

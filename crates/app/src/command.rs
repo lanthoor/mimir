@@ -88,6 +88,30 @@ pub fn library_list_years(state: tauri::State<'_, AppState>) -> Result<Vec<YearR
     state.list_years()
 }
 
+/// Tracks filtered by optional genre/year/artist/album facets.
+///
+/// All fields are optional. Empty/missing means "do not filter on that facet".
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_query_tracks(
+    state: tauri::State<'_, AppState>,
+    genre: Option<String>,
+    year: Option<i32>,
+    artist_id: Option<i64>,
+    album_id: Option<i64>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<TrackRow>, AppError> {
+    state.query_tracks_filtered(
+        genre,
+        year,
+        artist_id,
+        album_id,
+        limit.unwrap_or(100),
+        offset.unwrap_or(0),
+    )
+}
+
 /// Start (or replace) playback with the given track id.
 #[cfg(feature = "tauri")]
 #[tauri::command]

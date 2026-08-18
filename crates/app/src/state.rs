@@ -193,6 +193,30 @@ impl AppState {
         Ok(mimir_core::query::list_years(&conn)?)
     }
 
+    /// Tracks filtered by an optional combination of facets.
+    #[allow(clippy::too_many_arguments)]
+    pub fn query_tracks_filtered(
+        &self,
+        genre: Option<String>,
+        year: Option<i32>,
+        artist_id: Option<i64>,
+        album_id: Option<i64>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::TrackRow>, AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let filter = mimir_core::query::TrackFilter {
+            genre,
+            year,
+            artist_id,
+            album_id,
+        };
+        Ok(mimir_core::query::list_tracks_filtered(
+            &conn, &filter, limit, offset,
+        )?)
+    }
+
     pub fn transport(&self) -> Transport {
         self.inner.lock().expect("state poisoned").transport.clone()
     }
