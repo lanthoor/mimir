@@ -69,21 +69,22 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
     let channels = probe.channels.map(i32::from);
     let bitrate = probe.bitrate;
     let title = tags.title.as_deref();
+    let genre = tags.genre.as_deref();
     let track_no = tags.track_no.map(i64::from);
     let disc_no = tags.disc_no.map(i64::from);
 
     tx.execute(
         "INSERT INTO track (\
             path, path_hash, mtime_ns, size_bytes, codec, duration_ms, sample_rate, \
-            channels, bitrate, title, track_no, disc_no, album_id, folder_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)\
+            channels, bitrate, title, genre, track_no, disc_no, album_id, folder_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)\
          ON CONFLICT(path_hash, mtime_ns, size_bytes) DO UPDATE SET \
             path = excluded.path, codec = excluded.codec, \
             duration_ms = excluded.duration_ms, sample_rate = excluded.sample_rate, \
             channels = excluded.channels, bitrate = excluded.bitrate, \
-            title = excluded.title, track_no = excluded.track_no, \
-            disc_no = excluded.disc_no, album_id = excluded.album_id, \
-            folder_id = excluded.folder_id",
+            title = excluded.title, genre = excluded.genre, \
+            track_no = excluded.track_no, disc_no = excluded.disc_no, \
+            album_id = excluded.album_id, folder_id = excluded.folder_id",
         rusqlite::params![
             path_str,
             &file_hash.path_hash[..],
@@ -95,6 +96,7 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
             channels,
             bitrate,
             title,
+            genre,
             track_no,
             disc_no,
             album_id,

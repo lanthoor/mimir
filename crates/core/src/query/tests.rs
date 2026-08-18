@@ -5,7 +5,8 @@ use rusqlite::Connection;
 use crate::db::Library;
 use crate::metadata::ingest;
 use crate::query::{
-    list_albums, list_artists, list_tracks, search_tracks, AlbumRow, ArtistRow, TrackRow,
+    list_albums, list_artists, list_genres, list_tracks, list_years, search_tracks, AlbumRow,
+    ArtistRow, TrackRow,
 };
 use crate::scanner::{hash_file, ScanJob};
 
@@ -152,4 +153,113 @@ fn search_tracks_is_di_acritic_insensitive() {
 
     let hits = search_tracks(&conn, "joga", 50).expect("search");
     assert_eq!(hits.len(), 1, "diacritic-insensitive FTS must match Jóga");
+}
+
+#[test]
+fn list_genres_groups_and_counts_by_genre() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    conn.execute(
+        "INSERT INTO artist (name, sort_name) VALUES ('Björk', 'Bjork')",
+        [],
+    )
+    .expect("artist");
+    let artist_id: i64 = conn
+        .query_row("SELECT id FROM artist WHERE name = 'Björk'", [], |row| {
+            row.get(0)
+        })
+        .expect("artist_id");
+    conn.execute(
+        "INSERT INTO album (title, album_artist_id, year) VALUES ('Homogenic', ?1, 1997)",
+        [artist_id],
+    )
+    .expect("album");
+    let album_id: i64 = conn
+        .query_row(
+            "SELECT id FROM album WHERE id = last_insert_rowid()",
+            [],
+            |row| row.get(0),
+        )
+        .expect("album_id");
+    for (i, (path, genre)) in [
+        ("/a/1.mp3", Some("Electronic")),
+        ("/a/2.mp3", Some("Electronic")),
+        ("/a/3.mp3", Some("Pop")),
+        ("/a/4.mp3", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let hash = i64::from(u32::try_from(i).expect("test index fits u32"));
+        conn.execute(
+            "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, genre, album_id) \
+             VALUES (?1, ?4, 0, 0, 'mp3', 't', ?2, ?3)",
+            rusqlite::params![path, genre, album_id, hash],
+        )
+        .expect("track");
+    }
+
+    let genres = list_genres(&conn).expect("list");
+    assert_eq!(genres.len(), 2);
+    assert_eq!(genres[0].name, "Electronic");
+    assert_eq!(genres[0].track_count, 2);
+    assert_eq!(genres[1].name, "Pop");
+    assert_eq!(genres[1].track_count, 1);
+}
+
+#[test]
+fn list_years_groups_and_counts_by_album_year() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    conn.execute(
+        "INSERT INTO artist (name, sort_name) VALUES ('Radiohead', 'radiohead')",
+        [],
+    )
+    .expect("artist");
+    let artist_id: i64 = conn
+        .query_row(
+            "SELECT id FROM artist WHERE name = 'Radiohead'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("artist_id");
+
+    let mut track_idx: i64 = 0;
+    for (album_title, year, count) in [
+        ("OK Computer", 1997_i32, 2_i64),
+        ("Kid A", 2000, 1),
+        ("Unknown Year Album", -1, 0), // no year → excluded
+    ] {
+        conn.execute(
+            "INSERT INTO album (title, album_artist_id, year) VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                album_title,
+                artist_id,
+                if year < 0 { None } else { Some(year) }
+            ],
+        )
+        .expect("album");
+        let album_id: i64 = conn
+            .query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+            .expect("album_id");
+        for _ in 0..count {
+            conn.execute(
+                "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, album_id) \
+                 VALUES (?1, ?3, 0, 0, 'mp3', 't', ?2)",
+                rusqlite::params![
+                    format!("/{album_title}-{track_idx}.mp3"),
+                    album_id,
+                    track_idx + 10,
+                ],
+            )
+            .expect("track");
+            track_idx += 1;
+        }
+    }
+
+    let years = list_years(&conn).expect("list");
+    let pairs: Vec<(i32, i64)> = years.iter().map(|y| (y.year, y.track_count)).collect();
+    assert_eq!(pairs, vec![(1997, 2), (2000, 1)]);
 }

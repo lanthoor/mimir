@@ -81,6 +81,12 @@ function renderCard(item) {
       img.src = cover;
       card.append(img);
     }
+  } else if (state.view === "genres") {
+    title.textContent = item.name;
+    subtitle.textContent = `${item.track_count} tracks`;
+  } else if (state.view === "years") {
+    title.textContent = String(item.year);
+    subtitle.textContent = `${item.track_count} tracks`;
   } else {
     title.textContent = item.name;
     subtitle.textContent = "";
@@ -116,6 +122,10 @@ async function refresh() {
           }
         }),
       );
+    } else if (state.view === "genres") {
+      state.items = await invoke("library_list_genres");
+    } else if (state.view === "years") {
+      state.items = await invoke("library_list_years");
     } else {
       // Artists are not yet exposed via IPC; show empty state.
       state.items = [];
