@@ -3,8 +3,11 @@
 use std::path::Path;
 
 use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
+use lofty::picture::Picture;
 use lofty::probe::Probe as LoftyProbe;
 use thiserror::Error;
+
+use super::cover::{select_cover, CoverArt};
 
 /// Coarse audio properties extracted from the container header.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +66,23 @@ pub(crate) fn read_tagged_file(path: &Path) -> Result<TaggedFile, ProbeError> {
         probe = probe.guess_file_type().map_err(ProbeError::Io)?;
     }
     probe.read().map_err(|e| ProbeError::Lofty(e.to_string()))
+}
+
+/// Read the embedded cover art from `path`, if any.
+///
+/// Returns `Ok(None)` when the file has no pictures or cannot be parsed by
+/// `lofty`; returns `Err` only on I/O failure.
+pub fn extract_cover(path: &Path) -> Result<Option<CoverArt>, ProbeError> {
+    let tagged = match read_tagged_file(path) {
+        Ok(t) => t,
+        Err(e @ ProbeError::Io(_)) => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let Some(primary) = TaggedFileExt::primary_tag(&tagged) else {
+        return Ok(None);
+    };
+    let pictures: Vec<&Picture> = primary.pictures().iter().collect();
+    Ok(select_cover(&pictures))
 }
 
 impl Probe {

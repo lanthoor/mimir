@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use crate::db::Library;
+use crate::db::{album_cover, Library};
 use crate::metadata::{
     extract_tags, ingest, parse_filename, probe_file, select_cover, upsert_album, upsert_artist,
     HeuristicTags, Tags,
@@ -260,4 +260,47 @@ fn select_cover_uses_octet_stream_when_mime_unknown() {
     let chosen = select_cover(&picks).expect("a pick");
     assert_eq!(chosen.mime_type, "application/octet-stream");
     assert_eq!(chosen.data, b"raw-bytes");
+}
+
+#[test]
+fn ingest_does_not_attach_cover_when_album_has_none() {
+    use crate::scanner::{hash_file, ScanJob};
+
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let artist_dir = dir.path().join("Björk");
+    let album_dir = artist_dir.join("Homogénic");
+    fs::create_dir_all(&album_dir).expect("mkdir");
+    let track = album_dir.join("05 - Hunter.mp3");
+    fs::write(&track, minimal_mp3()).expect("write");
+
+    let folder_id =
+        crate::scanner::upsert_folder(&conn, dir.path().to_str().unwrap()).expect("folder");
+    let file_hash = hash_file(&track).expect("hash");
+    let track_id = ingest(
+        &conn,
+        ScanJob {
+            folder_id,
+            path: track.clone(),
+            file_hash,
+        },
+    )
+    .expect("ingest");
+
+    // Album exists; the file has no embedded art → no cover row attached.
+    let album_id: i64 = conn
+        .query_row(
+            "SELECT album_id FROM track WHERE id = ?1",
+            [track_id],
+            |row| row.get(0),
+        )
+        .expect("album_id");
+    assert!(album_cover(&conn, album_id).expect("fetch").is_none());
+
+    let cover_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM cover_art", [], |row| row.get(0))
+        .expect("count");
+    assert_eq!(cover_count, 0);
 }

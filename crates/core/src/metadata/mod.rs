@@ -13,6 +13,6 @@ mod tests;
 pub use cover::{select_cover, CoverArt};
 pub use extract::{extract_tags, Tags};
 pub use heuristic::{parse_filename, HeuristicTags};
-pub use probe::{probe_file, Probe};
+pub use probe::{extract_cover, probe_file, Probe};
 pub use upsert::{upsert_album, upsert_artist};
 pub use worker::{ingest, run_worker, IngestError};
