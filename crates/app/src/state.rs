@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 
 use mimir_audio::{Transport, TransportCommand};
 use mimir_core::db::Library;
+#[cfg(feature = "tauri")]
+use mimir_core::rusqlite;
 use mimir_core::scanner::ScanJob;
 use serde::Serialize;
 
@@ -215,6 +217,65 @@ impl AppState {
         Ok(mimir_core::query::list_tracks_filtered(
             &conn, &filter, limit, offset,
         )?)
+    }
+
+    /// Fetch the editable subset of a track.
+    #[cfg(feature = "tauri")]
+    pub fn get_editable_track(
+        &self,
+        track_id: i64,
+    ) -> Result<crate::command::EditableTrackFields, AppError> {
+        use crate::command::EditableTrackFields;
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let row: (
+            Option<String>,
+            Option<String>,
+            Option<i32>,
+            Option<i32>,
+            Option<i32>,
+        ) = conn
+            .query_row(
+                "SELECT t.title, t.genre, a.year, t.track_no, t.disc_no \
+                 FROM track t LEFT JOIN album a ON a.id = t.album_id \
+                 WHERE t.id = ?1",
+                [track_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::Internal(format!("no track with id {track_id}"))
+                }
+                other => AppError::Sqlite(other.to_string()),
+            })?;
+        Ok(EditableTrackFields {
+            title: row.0,
+            genre: row.1,
+            year: row.2,
+            track_no: row.3,
+            disc_no: row.4,
+        })
+    }
+
+    /// Apply an edit patch to a track. DB-only; never writes the file.
+    #[cfg(feature = "tauri")]
+    pub fn update_track(
+        &self,
+        track_id: i64,
+        patch: mimir_core::db::TrackPatch,
+    ) -> Result<(), AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        mimir_core::db::update_track(&conn, track_id, &patch)?;
+        Ok(())
     }
 
     pub fn transport(&self) -> Transport {

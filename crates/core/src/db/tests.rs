@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
-use crate::db::{album_cover, attach_album_cover, detach_album_cover, Library};
+use crate::db::{
+    album_cover, attach_album_cover, detach_album_cover, update_track, Library, TrackPatch,
+    UpdateError,
+};
 use crate::metadata::{upsert_album, upsert_artist, CoverArt};
 
 const EXPECTED_TABLES: &[&str] = &[
@@ -219,4 +222,125 @@ fn detach_album_cover_clears_link_but_preserves_row() {
         )
         .expect("count");
     assert_eq!(row_count, 1, "shared cover row must survive detach");
+}
+
+fn insert_track(conn: &rusqlite::Connection, path: &str, hash: i64) -> i64 {
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title) \
+         VALUES (?1, ?2, 0, 0, 'mp3', 'orig-title')",
+        rusqlite::params![path, hash],
+    )
+    .expect("track");
+    conn.query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+        .expect("id")
+}
+
+#[test]
+fn update_track_writes_provided_fields() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let id = insert_track(&conn, "/t.mp3", 42);
+
+    update_track(
+        &conn,
+        id,
+        &TrackPatch {
+            title: Some(Some("New Title".into())),
+            genre: Some(Some("Indie".into())),
+            track_no: Some(Some(7)),
+            ..TrackPatch::default()
+        },
+    )
+    .expect("update");
+
+    let (title, genre, tno): (String, String, i64) = conn
+        .query_row(
+            "SELECT title, genre, track_no FROM track WHERE id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read");
+    assert_eq!(title, "New Title");
+    assert_eq!(genre, "Indie");
+    assert_eq!(tno, 7);
+}
+
+#[test]
+fn update_track_clears_when_inner_option_is_none() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let id = insert_track(&conn, "/t.mp3", 1);
+    conn.execute("UPDATE track SET genre = 'X' WHERE id = ?1", [id])
+        .expect("seed");
+
+    update_track(
+        &conn,
+        id,
+        &TrackPatch {
+            genre: Some(None),
+            ..TrackPatch::default()
+        },
+    )
+    .expect("update");
+
+    let cleared: Option<String> = conn
+        .query_row("SELECT genre FROM track WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .expect("read");
+    assert!(cleared.is_none(), "clear path must null the column");
+}
+
+#[test]
+fn update_track_leaves_untouched_fields_alone() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let id = insert_track(&conn, "/t.mp3", 2);
+    conn.execute("UPDATE track SET title = 'keep' WHERE id = ?1", [id])
+        .expect("seed");
+
+    update_track(
+        &conn,
+        id,
+        &TrackPatch {
+            genre: Some(Some("Rock".into())),
+            ..TrackPatch::default()
+        },
+    )
+    .expect("update");
+
+    let title: Option<String> = conn
+        .query_row("SELECT title FROM track WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .expect("read");
+    assert_eq!(title.as_deref(), Some("keep"));
+}
+
+#[test]
+fn update_track_unknown_id_returns_not_found() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let err = update_track(
+        &conn,
+        9_999_999,
+        &TrackPatch {
+            title: Some(Some("x".into())),
+            ..TrackPatch::default()
+        },
+    )
+    .expect_err("missing row");
+    assert!(
+        matches!(err, UpdateError::NotFound(9_999_999)),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn update_track_empty_patch_is_noop() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let id = insert_track(&conn, "/t.mp3", 3);
+    let result = update_track(&conn, id, &TrackPatch::default()).expect("noop");
+    assert_eq!(result, id);
 }

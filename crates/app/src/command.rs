@@ -112,6 +112,129 @@ pub fn library_query_tracks(
     )
 }
 
+/// Editable tags for a single track.
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EditableTrackFields {
+    pub title: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<i32>,
+    pub track_no: Option<i32>,
+    pub disc_no: Option<i32>,
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_get_editable_track(
+    state: tauri::State<'_, AppState>,
+    track_id: i64,
+) -> Result<EditableTrackFields, AppError> {
+    state.get_editable_track(track_id)
+}
+
+#[cfg(feature = "tauri")]
+#[derive(Debug, serde::Deserialize)]
+pub struct TrackPatchInput {
+    pub title: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<i32>,
+    pub track_no: Option<i32>,
+    pub disc_no: Option<i32>,
+    /// Field names to clear (set to NULL). Valid: "title","genre","year",
+    /// "track_no","disc_no". Use this when you want to unset a column
+    /// rather than replace it.
+    pub clear: Vec<String>,
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_update_track(
+    state: tauri::State<'_, AppState>,
+    track_id: i64,
+    patch: TrackPatchInput,
+) -> Result<(), AppError> {
+    use mimir_core::db::TrackPatch;
+    let mut t: Option<Option<String>> = None;
+    let mut g: Option<Option<String>> = None;
+    let mut y: Option<Option<i32>> = None;
+    let mut tn: Option<Option<i32>> = None;
+    let mut dn: Option<Option<i32>> = None;
+    for f in &patch.clear {
+        match f.as_str() {
+            "title" => t = Some(None),
+            "genre" => g = Some(None),
+            "year" => y = Some(None),
+            "track_no" => tn = Some(None),
+            "disc_no" => dn = Some(None),
+            _ => {}
+        }
+    }
+    if patch.title.is_some() {
+        t = Some(patch.title);
+    }
+    if patch.genre.is_some() {
+        g = Some(patch.genre);
+    }
+    if patch.year.is_some() {
+        y = Some(patch.year);
+    }
+    if patch.track_no.is_some() {
+        tn = Some(patch.track_no);
+    }
+    if patch.disc_no.is_some() {
+        dn = Some(patch.disc_no);
+    }
+    state.update_track(
+        track_id,
+        TrackPatch {
+            title: t,
+            genre: g,
+            year: y,
+            track_no: tn,
+            disc_no: dn,
+        },
+    )
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_clear_track_field(
+    state: tauri::State<'_, AppState>,
+    track_id: i64,
+    field: String,
+) -> Result<(), AppError> {
+    let patch = build_clear_patch(&field);
+    state.update_track(track_id, patch)
+}
+
+#[cfg(feature = "tauri")]
+fn build_clear_patch(field: &str) -> mimir_core::db::TrackPatch {
+    use mimir_core::db::TrackPatch;
+    match field {
+        "title" => TrackPatch {
+            title: Some(None),
+            ..TrackPatch::default()
+        },
+        "genre" => TrackPatch {
+            genre: Some(None),
+            ..TrackPatch::default()
+        },
+        "year" => TrackPatch {
+            year: Some(None),
+            ..TrackPatch::default()
+        },
+        "track_no" => TrackPatch {
+            track_no: Some(None),
+            ..TrackPatch::default()
+        },
+        "disc_no" => TrackPatch {
+            disc_no: Some(None),
+            ..TrackPatch::default()
+        },
+        _ => TrackPatch::default(),
+    }
+}
+
 /// Start (or replace) playback with the given track id.
 #[cfg(feature = "tauri")]
 #[tauri::command]

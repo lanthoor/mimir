@@ -27,6 +27,8 @@ const $addFolder = document.getElementById("add-folder");
 const $addFolderDialog = document.getElementById("add-folder-dialog");
 const $addFolderPath = document.getElementById("add-folder-path");
 const $status = document.getElementById("status");
+const $editDialog = document.getElementById("edit-track-dialog");
+const $editForm = document.getElementById("edit-track-form");
 
 const $prev = document.getElementById("prev");
 const $play = document.getElementById("play");
@@ -96,6 +98,10 @@ function renderCard(item) {
     subtitle.textContent =
       [item.artist_name, item.album_title].filter(Boolean).join(" — ") || item.path;
     card.addEventListener("dblclick", () => invoke("audio_play", { trackId: item.id }));
+    card.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      openTrackEditor(item.id);
+    });
   } else if (state.view === "albums") {
     title.textContent = item.title;
     subtitle.textContent =
@@ -229,6 +235,61 @@ $addFolderDialog.addEventListener("close", async () => {
       console.error("add_folder failed:", e);
       alert(`Add folder failed: ${e?.message ?? e}`);
     }
+  }
+});
+
+async function openTrackEditor(trackId) {
+  try {
+    const fields = await invoke("library_get_editable_track", { trackId });
+    $editForm.elements["title"].value = fields.title ?? "";
+    $editForm.elements["genre"].value = fields.genre ?? "";
+    $editForm.elements["year"].value = fields.year ?? "";
+    $editForm.elements["track_no"].value = fields.track_no ?? "";
+    $editForm.elements["disc_no"].value = fields.disc_no ?? "";
+    $editForm.dataset.trackId = String(trackId);
+    $editDialog.showModal();
+  } catch (e) {
+    console.error("get_editable_track failed:", e);
+    alert(`Open editor failed: ${e?.message ?? e}`);
+  }
+}
+
+$editDialog.addEventListener("close", async () => {
+  if ($editDialog.returnValue !== "save") return;
+  const trackId = Number($editForm.dataset.trackId);
+  const data = new FormData($editForm);
+  const strOrNull = (name) => {
+    const v = String(data.get(name) ?? "").trim();
+    return v === "" ? null : v;
+  };
+  const intOrNull = (name) => {
+    const v = strOrNull(name);
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  };
+  // To clear a field, push its name into `clear`. To set it, include the
+  // (possibly null) value. The Rust side translates this into the
+  // `Option<Option<T>>` semantic.
+  const clearedKeys = ["title", "genre", "year", "track_no", "disc_no"];
+  const patch = {
+    title: strOrNull("title"),
+    genre: strOrNull("genre"),
+    year: intOrNull("year"),
+    track_no: intOrNull("track_no"),
+    disc_no: intOrNull("disc_no"),
+    clear: [],
+  };
+  // Clear semantics: empty input clears the field.
+  for (const k of clearedKeys) {
+    if (patch[k] == null) patch.clear.push(k);
+  }
+  try {
+    await invoke("library_update_track", { trackId, patch });
+    await refresh();
+  } catch (e) {
+    console.error("update_track failed:", e);
+    alert(`Save failed: ${e?.message ?? e}`);
   }
 });
 

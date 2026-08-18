@@ -48,6 +48,18 @@ impl From<mimir_core::db::DbError> for AppError {
     }
 }
 
+#[cfg(feature = "tauri")]
+impl From<mimir_core::db::UpdateError> for AppError {
+    fn from(e: mimir_core::db::UpdateError) -> Self {
+        match e {
+            mimir_core::db::UpdateError::Sqlite(e) => Self::Sqlite(e.to_string()),
+            mimir_core::db::UpdateError::NotFound(id) => {
+                Self::Internal(format!("track {id} not found"))
+            }
+        }
+    }
+}
+
 #[cfg(feature = "output")]
 impl From<mimir_audio::PlayerError> for AppError {
     fn from(e: mimir_audio::PlayerError) -> Self {
