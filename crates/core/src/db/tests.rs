@@ -2,7 +2,8 @@
 
 use std::path::PathBuf;
 
-use crate::db::Library;
+use crate::db::{album_cover, attach_album_cover, detach_album_cover, Library};
+use crate::metadata::{upsert_album, upsert_artist, CoverArt};
 
 const EXPECTED_TABLES: &[&str] = &[
     "artist",
@@ -139,4 +140,83 @@ fn fts5_matches_diacritics() {
         )
         .expect("query");
     assert_eq!(count, 1, "diacritic-insensitive search must match Jóga");
+}
+
+fn make_album_with_artist(conn: &rusqlite::Connection, artist: &str, album: &str) -> i64 {
+    let artist_id = upsert_artist(conn, artist).expect("artist");
+    upsert_album(conn, album, artist_id, None).expect("album")
+}
+
+fn png_cover(seed: u8) -> CoverArt {
+    // 1x1 white PNG (canonical 67-byte payload) repeated to add entropy so
+    // each invocation produces a distinct `content_hash` when needed.
+    let bytes = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let mut v = bytes;
+    v.push(seed);
+    CoverArt {
+        mime_type: "image/png".to_string(),
+        data: v,
+    }
+}
+
+#[test]
+fn attach_and_fetch_album_cover_round_trips() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let album_id = make_album_with_artist(&conn, "Björk", "Homogénic");
+
+    let cover = png_cover(1);
+    let cover_id = attach_album_cover(&conn, album_id, &cover, "embedded").expect("attach");
+
+    let row = album_cover(&conn, album_id)
+        .expect("fetch")
+        .expect("present");
+    assert_eq!(row.mime_type, "image/png");
+    assert_eq!(row.data, cover.data);
+
+    let stored_id: i64 = conn
+        .query_row(
+            "SELECT cover_art_id FROM album WHERE id = ?1",
+            [album_id],
+            |row| row.get(0),
+        )
+        .expect("col");
+    assert_eq!(stored_id, cover_id);
+}
+
+#[test]
+fn attach_reuses_existing_cover_for_same_bytes() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let album1 = make_album_with_artist(&conn, "Björk", "Homogénic");
+    let artist_id = upsert_artist(&conn, "compilation").expect("artist");
+    let album2 = upsert_album(&conn, "Homogénic (rerelease)", artist_id, None).expect("album");
+
+    let cover = png_cover(2);
+    let id1 = attach_album_cover(&conn, album1, &cover, "embedded").expect("first");
+    let id2 = attach_album_cover(&conn, album2, &cover, "embedded").expect("second");
+    assert_eq!(id1, id2, "same bytes must dedupe to one row");
+
+    let distinct = png_cover(3);
+    let id3 = attach_album_cover(&conn, album1, &distinct, "embedded").expect("third");
+    assert_ne!(id1, id3);
+}
+
+#[test]
+fn detach_album_cover_clears_link_but_preserves_row() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let album_id = make_album_with_artist(&conn, "Björk", "Homogénic");
+    let cover_id = attach_album_cover(&conn, album_id, &png_cover(4), "embedded").expect("attach");
+    detach_album_cover(&conn, album_id).expect("detach");
+
+    assert!(album_cover(&conn, album_id).expect("fetch").is_none());
+    let row_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM cover_art WHERE id = ?1",
+            [cover_id],
+            |row| row.get(0),
+        )
+        .expect("count");
+    assert_eq!(row_count, 1, "shared cover row must survive detach");
 }
