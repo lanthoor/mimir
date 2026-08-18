@@ -12,6 +12,7 @@ const EXPECTED_TABLES: &[&str] = &[
     "playlist",
     "playlist_track",
     "schema_version",
+    "cover_art",
 ];
 
 #[test]

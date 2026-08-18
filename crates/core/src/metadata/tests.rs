@@ -4,8 +4,8 @@ use std::fs;
 
 use crate::db::Library;
 use crate::metadata::{
-    extract_tags, ingest, parse_filename, probe_file, upsert_album, upsert_artist, HeuristicTags,
-    Tags,
+    extract_tags, ingest, parse_filename, probe_file, select_cover, upsert_album, upsert_artist,
+    HeuristicTags, Tags,
 };
 use crate::scanner::ScanJob;
 
@@ -199,4 +199,65 @@ fn ingest_writes_artist_album_and_track_in_one_tx() {
         )
         .expect("fts");
     assert_eq!(hit, 1);
+}
+
+fn make_picture(
+    pic_type: lofty::picture::PictureType,
+    mime: Option<lofty::picture::MimeType>,
+    data: &[u8],
+) -> lofty::picture::Picture {
+    lofty::picture::Picture::new_unchecked(pic_type, mime, None, data.to_vec())
+}
+
+#[test]
+fn select_cover_returns_none_for_empty_list() {
+    let pics: Vec<&lofty::picture::Picture> = vec![];
+    assert!(select_cover(&pics).is_none());
+}
+
+#[test]
+fn select_cover_prefers_front_cover_when_present() {
+    let back = make_picture(
+        lofty::picture::PictureType::CoverBack,
+        Some(lofty::picture::MimeType::Jpeg),
+        b"back-bytes",
+    );
+    let front = make_picture(
+        lofty::picture::PictureType::CoverFront,
+        Some(lofty::picture::MimeType::Png),
+        b"front-bytes",
+    );
+    let other = make_picture(
+        lofty::picture::PictureType::Other,
+        Some(lofty::picture::MimeType::Jpeg),
+        b"other-bytes",
+    );
+    let picks: Vec<&lofty::picture::Picture> = vec![&other, &back, &front];
+
+    let chosen = select_cover(&picks).expect("a pick");
+    assert_eq!(chosen.mime_type, "image/png");
+    assert_eq!(chosen.data, b"front-bytes");
+}
+
+#[test]
+fn select_cover_falls_back_to_first_when_no_front() {
+    let back = make_picture(
+        lofty::picture::PictureType::CoverBack,
+        Some(lofty::picture::MimeType::Jpeg),
+        b"back-bytes",
+    );
+    let picks: Vec<&lofty::picture::Picture> = vec![&back];
+
+    let chosen = select_cover(&picks).expect("a pick");
+    assert_eq!(chosen.mime_type, "image/jpeg");
+    assert_eq!(chosen.data, b"back-bytes");
+}
+
+#[test]
+fn select_cover_uses_octet_stream_when_mime_unknown() {
+    let pic = make_picture(lofty::picture::PictureType::CoverFront, None, b"raw-bytes");
+    let picks: Vec<&lofty::picture::Picture> = vec![&pic];
+    let chosen = select_cover(&picks).expect("a pick");
+    assert_eq!(chosen.mime_type, "application/octet-stream");
+    assert_eq!(chosen.data, b"raw-bytes");
 }
