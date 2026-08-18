@@ -32,6 +32,7 @@ pub fn run() {
             command::library_get_editable_track,
             command::library_update_track,
             command::library_clear_track_field,
+            command::library_track_lyrics,
             command::audio_play,
             command::audio_pause,
             command::audio_resume,

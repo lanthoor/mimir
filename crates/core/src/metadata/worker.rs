@@ -5,7 +5,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use thiserror::Error;
 
-use crate::db::attach_album_cover;
+use crate::db::{attach_album_cover, upsert_lyrics};
 use crate::scanner::ScanJob;
 
 use super::extract::{extract_tags, Tags};
@@ -113,6 +113,10 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
         ],
         |row| row.get(0),
     )?;
+
+    if let Some(lyrics) = tags.lyrics.as_deref() {
+        upsert_lyrics(conn, track_id, lyrics, "und", "embedded")?;
+    }
 
     tx.commit()?;
     Ok(track_id)

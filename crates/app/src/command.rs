@@ -235,6 +235,30 @@ fn build_clear_patch(field: &str) -> mimir_core::db::TrackPatch {
     }
 }
 
+/// Lyrics for a track as `(text, language, source)`. `None` when absent.
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LyricsPayload {
+    pub text: String,
+    pub language: String,
+    pub source: String,
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_track_lyrics(
+    state: tauri::State<'_, AppState>,
+    track_id: i64,
+) -> Result<Option<LyricsPayload>, AppError> {
+    state.track_lyrics(track_id).map(|opt| {
+        opt.map(|r| LyricsPayload {
+            text: r.text,
+            language: r.language,
+            source: r.source,
+        })
+    })
+}
+
 /// Start (or replace) playback with the given track id.
 #[cfg(feature = "tauri")]
 #[tauri::command]

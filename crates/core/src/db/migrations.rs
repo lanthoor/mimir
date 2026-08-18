@@ -47,6 +47,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 8,
         sql: include_str!("../../migrations/0008_fts_genre_from_track.sql"),
     },
+    Migration {
+        version: 9,
+        sql: include_str!("../../migrations/0009_lyrics.sql"),
+    },
 ];
 
 const SCHEMA_VERSION_DDL: &str = "CREATE TABLE IF NOT EXISTS schema_version (\

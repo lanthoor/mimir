@@ -27,8 +27,11 @@
     </main>
 
     <footer class="now-playing">
-      <span id="np-title">—</span>
-      <span id="np-artist"></span>
+      <div class="now-playing-meta">
+        <span id="np-title">—</span>
+        <span id="np-artist"></span>
+      </div>
+      <button id="lyrics-toggle" title="show lyrics" hidden>Lyrics</button>
       <div class="controls">
         <button id="prev" title="previous">⏮</button>
         <button id="play" title="play">▶</button>
@@ -37,6 +40,16 @@
         <button id="next" title="next">⏭</button>
       </div>
     </footer>
+
+    <dialog id="lyrics-dialog">
+      <form method="dialog">
+        <h2>Lyrics</h2>
+        <pre id="lyrics-content"></pre>
+        <menu>
+          <button value="cancel">Close</button>
+        </menu>
+      </form>
+    </dialog>
 
     <dialog id="add-folder-dialog">
       <form method="dialog">
