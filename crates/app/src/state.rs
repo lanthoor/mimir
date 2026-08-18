@@ -147,6 +147,20 @@ impl AppState {
         Ok(folder_id)
     }
 
+    /// Add multiple folders in one go. Each is upserted by path so re-adding
+    /// the same root is a no-op. Workers drain scan jobs on a shared thread.
+    pub fn add_folders<I, P>(&self, paths: I) -> Result<Vec<i64>, AppError>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let mut ids = Vec::new();
+        for p in paths {
+            ids.push(self.add_folder(p.as_ref())?);
+        }
+        Ok(ids)
+    }
+
     pub fn search(
         &self,
         query: &str,
