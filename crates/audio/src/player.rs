@@ -30,6 +30,11 @@ pub enum PlayerCommand {
     Stop,
     Next,
     Previous,
+    /// Pre-decode the next track into a side buffer so the output callback
+    /// can swap to it the moment the current buffer is exhausted.
+    /// Idempotent: a second `PrepareNext` before consumption replaces the
+    /// pending buffer.
+    PrepareNext(PathBuf),
     /// Set the ReplayGain-style gain (in dB) applied to every subsequent
     /// decode. Pass `None` to disable gain (raw playback). `0.0` writes the
     /// buffer untouched. Out-of-range values are clipped per-sample.
@@ -41,6 +46,8 @@ pub enum PlayerCommand {
 pub struct PlayerSnapshot {
     pub state: TransportState,
     pub current: Option<PathBuf>,
+    /// Path of the pre-decoded "next" track, if any.
+    pub next_prepared: Option<PathBuf>,
 }
 
 /// Cheaply clone-able handle to send commands to the player worker thread.
@@ -176,12 +183,26 @@ impl OutputStream for NoopOutputStream {
 fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) {
     let mut output: Option<Box<dyn OutputStream>> = None;
     let buffer: SharedBuffer = Arc::new(Mutex::new(BufferState::empty()));
+    // Side buffer that holds the pre-decoded "next" track. The output
+    // callback pulls from `buffer` first; if its `fill()` returns 0
+    // samples, the callback swaps in `next_buffer` so playback continues
+    // without a gap.
+    let next_buffer: SharedBuffer = Arc::new(Mutex::new(BufferState::empty()));
     let gain_db: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
             PlayerCommand::SetReplayGainDb(g) => {
                 *gain_db.lock().expect("gain poisoned") = g;
+            }
+            PlayerCommand::PrepareNext(path) => {
+                let gain = *gain_db.lock().expect("gain poisoned");
+                if let Err(e) = decode_to_buffer_with_gain(&path, &next_buffer, gain) {
+                    eprintln!("prepare_next decode failed: {e}");
+                } else {
+                    let mut snapshot = shared.lock().expect("player poisoned");
+                    snapshot.next_prepared = Some(path);
+                }
             }
             PlayerCommand::Play(path) => {
                 let gain = *gain_db.lock().expect("gain poisoned");

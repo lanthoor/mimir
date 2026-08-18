@@ -366,3 +366,24 @@ fn apply_gain_db_inplace_scales_and_clips() {
     assert!((samples[1] + 0.997_65).abs() < 1e-3);
     assert!((samples[2] - 1.0).abs() < 1e-6, "0.9 * 2 must clip to 1.0");
 }
+
+#[cfg(feature = "output")]
+#[test]
+fn prepare_next_decodes_into_side_buffer() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let wav = tmp.path().join("a.wav");
+    write_sine_wav(&wav, 4_096, 8_000);
+
+    let player = Player::new();
+    let h = player.handle();
+
+    h.send(PlayerCommand::PrepareNext(wav.clone()))
+        .expect("send");
+    wait_for(&player, |s| s.next_prepared == Some(wav.clone()));
+    let snap = player.snapshot();
+    assert_eq!(snap.next_prepared.as_ref(), Some(&wav));
+    assert!(
+        snap.current.is_none(),
+        "PrepareNext must not change current"
+    );
+}
