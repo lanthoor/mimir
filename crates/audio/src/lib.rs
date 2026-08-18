@@ -8,6 +8,7 @@
 //! stream, gated on the same `output` feature.
 
 pub mod decode;
+pub mod gain;
 #[cfg(feature = "output")]
 pub mod output;
 pub mod player;

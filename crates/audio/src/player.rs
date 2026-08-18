@@ -21,7 +21,7 @@ pub enum PlayerError {
 }
 
 /// Commands you can send to a running `Player`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlayerCommand {
     Play(PathBuf),
     Enqueue(PathBuf),
@@ -30,6 +30,10 @@ pub enum PlayerCommand {
     Stop,
     Next,
     Previous,
+    /// Set the ReplayGain-style gain (in dB) applied to every subsequent
+    /// decode. Pass `None` to disable gain (raw playback). `0.0` writes the
+    /// buffer untouched. Out-of-range values are clipped per-sample.
+    SetReplayGainDb(Option<f64>),
 }
 
 /// Snapshot of the player state for the UI.
@@ -172,24 +176,31 @@ impl OutputStream for NoopOutputStream {
 fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) {
     let mut output: Option<Box<dyn OutputStream>> = None;
     let buffer: SharedBuffer = Arc::new(Mutex::new(BufferState::empty()));
+    let gain_db: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
-            PlayerCommand::Play(path) => match decode_to_buffer(&path, &buffer) {
-                Ok(()) => {
-                    {
-                        let mut snapshot = shared.lock().expect("player poisoned");
-                        snapshot.current = Some(path.clone());
-                        snapshot.state = TransportState::Playing;
+            PlayerCommand::SetReplayGainDb(g) => {
+                *gain_db.lock().expect("gain poisoned") = g;
+            }
+            PlayerCommand::Play(path) => {
+                let gain = *gain_db.lock().expect("gain poisoned");
+                match decode_to_buffer_with_gain(&path, &buffer, gain) {
+                    Ok(()) => {
+                        {
+                            let mut snapshot = shared.lock().expect("player poisoned");
+                            snapshot.current = Some(path.clone());
+                            snapshot.state = TransportState::Playing;
+                        }
+                        output = open_output_stream(&buffer).ok();
                     }
-                    output = open_output_stream(&buffer).ok();
+                    Err(_e) => {
+                        let mut snapshot = shared.lock().expect("player poisoned");
+                        snapshot.current = Some(path);
+                        snapshot.state = TransportState::Stopped;
+                    }
                 }
-                Err(_e) => {
-                    let mut snapshot = shared.lock().expect("player poisoned");
-                    snapshot.current = Some(path);
-                    snapshot.state = TransportState::Stopped;
-                }
-            },
+            }
             PlayerCommand::Pause => {
                 let mut snapshot = shared.lock().expect("player poisoned");
                 snapshot.state = snapshot.state.pause();
@@ -219,10 +230,22 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
     }
 }
 
-/// Decode `path` into the shared buffer. On any failure the buffer is
-/// cleared and the error is logged to stderr.
-fn decode_to_buffer(path: &Path, buffer: &SharedBuffer) -> Result<(), PlayerError> {
-    let audio = super::decode::decode_file(path).map_err(|e| PlayerError::Decode(e.to_string()))?;
+/// Decode `path` into the shared buffer, applying `gain_db` (`ReplayGain` or
+/// any user-preference value in dB) in-place when `Some`. On any failure
+/// the buffer is cleared and the error is logged to stderr.
+///
+/// `gain_db == None` decodes raw. `gain_db == 0.0` still writes the buffer
+/// untouched. Out-of-range values are clipped per-sample at `[`-1.0`,`1.0`]`.
+pub(crate) fn decode_to_buffer_with_gain(
+    path: &Path,
+    buffer: &SharedBuffer,
+    gain_db: Option<f64>,
+) -> Result<(), PlayerError> {
+    let mut audio =
+        super::decode::decode_file(path).map_err(|e| PlayerError::Decode(e.to_string()))?;
+    if let Some(g) = gain_db {
+        super::gain::apply_gain_db_inplace(&mut audio.samples, g);
+    }
     let mut state = buffer.lock().expect("buffer poisoned");
     state.samples = audio.samples;
     state.position = 0;

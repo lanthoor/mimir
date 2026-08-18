@@ -1,15 +1,14 @@
 //! Embedded-tag extraction via `lofty`.
 
-use std::path::Path;
-
 use lofty::file::TaggedFileExt;
 use lofty::tag::{ItemKey, Tag};
+use std::path::Path;
 use thiserror::Error;
 
 use super::probe::read_tagged_file;
 
 /// Tags we care about for browsing / searching.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Tags {
     pub title: Option<String>,
     pub artist: Option<String>,
@@ -21,6 +20,10 @@ pub struct Tags {
     pub genre: Option<String>,
     pub composer: Option<String>,
     pub lyrics: Option<String>,
+    /// `ReplayGain` track gain in dB. `None` when absent.
+    pub replaygain_track_db: Option<f64>,
+    /// `ReplayGain` album gain in dB. `None` when absent.
+    pub replaygain_album_db: Option<f64>,
 }
 
 #[derive(Debug, Error)]
@@ -61,6 +64,16 @@ fn extract_from_tagged(tagged: &lofty::file::TaggedFile) -> Tags {
         genre: read_str(primary, &ItemKey::Genre),
         composer: read_str(primary, &ItemKey::Composer),
         lyrics: read_str(primary, &ItemKey::Lyrics),
+        replaygain_track_db: parse_replaygain(
+            primary,
+            "REPLAYGAIN_TRACK_GAIN",
+            "replaygain_track_gain",
+        ),
+        replaygain_album_db: parse_replaygain(
+            primary,
+            "REPLAYGAIN_ALBUM_GAIN",
+            "replaygain_album_gain",
+        ),
     }
 }
 
@@ -80,4 +93,33 @@ fn read_u32(tag: &Tag, key: &ItemKey) -> Option<u32> {
         }
     }
     None
+}
+
+/// Parse a `ReplayGain` dB value from any tag item whose key matches
+/// either the Vorbis-style upper-case form (e.g. `REPLAYGAIN_TRACK_GAIN`)
+/// or the `ID3v2` TXXX description lower-case form (e.g.
+/// `replaygain_track_gain`). Returns `None` if missing or invalid.
+pub fn parse_replaygain(tag: &Tag, vorbis_key: &str, txxx_desc: &str) -> Option<f64> {
+    for item in tag.items() {
+        if let ItemKey::Unknown(name) = item.key() {
+            if name == vorbis_key || name.eq_ignore_ascii_case(txxx_desc) {
+                if let Some(text) = item.value().text() {
+                    if let Some(db) = parse_db_string(text) {
+                        return Some(db);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse e.g. `"-6.84 dB"` → `-6.84`.
+fn parse_db_string(text: &str) -> Option<f64> {
+    let trimmed = text.trim().trim_end_matches(" dB").trim_end_matches("dB");
+    let cleaned: String = trimmed
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != ',')
+        .collect();
+    cleaned.parse().ok()
 }

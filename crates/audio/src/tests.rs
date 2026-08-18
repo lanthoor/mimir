@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::decode_file;
+use crate::gain::{apply_gain_db_inplace, db_to_linear};
 use crate::transport::{PlaybackQueue, Transport, TransportCommand, TransportState};
 #[cfg(feature = "output")]
 use crate::{Player, PlayerCommand, PlayerSnapshot};
@@ -341,4 +342,27 @@ fn player_stop_clears_current_then_play_resets() {
 
     h.send(PlayerCommand::Play(b.clone())).expect("send");
     wait_for(&p, |s| s.current == Some(b.clone()));
+}
+
+#[test]
+fn db_to_linear_zero_is_unity() {
+    let g = db_to_linear(0.0);
+    assert!((g - 1.0).abs() < 1e-6, "0 dB -> {g}");
+}
+
+#[test]
+fn db_to_linear_minus_six_is_half() {
+    // -6.0206 dB ≈ ×0.5 (the precise ReplayGain reference).
+    let g = db_to_linear(-6.0206);
+    assert!((g - 0.5).abs() < 1e-3, "-6.0206 dB -> {g}");
+}
+
+#[test]
+fn apply_gain_db_inplace_scales_and_clips() {
+    // +6 dB ≈ ×1.9953; 0.5 * 1.9953 ≈ 0.99765 — verify within tolerance.
+    let mut samples = vec![0.5_f32, -0.5, 0.9];
+    apply_gain_db_inplace(&mut samples, 6.0);
+    assert!((samples[0] - 0.997_65).abs() < 1e-3, "got {}", samples[0]);
+    assert!((samples[1] + 0.997_65).abs() < 1e-3);
+    assert!((samples[2] - 1.0).abs() < 1e-6, "0.9 * 2 must clip to 1.0");
 }
