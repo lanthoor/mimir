@@ -155,6 +155,19 @@ impl AppState {
         Ok(mimir_core::query::search_tracks(&conn, query, limit)?)
     }
 
+    /// Return the cover art attached to `album_id`, if any. The cover is
+    /// returned as `(mime_type, bytes)` so the front-end can render it
+    /// directly via a `data:` URL or `Blob`.
+    // ponytail: single IPC round-trip per album; covers above ~2 MB will
+    // degrade the WebView serialise step. Switch to a Tauri channel and
+    // stream bytes if user libraries routinely hold >5 MB scans.
+    pub fn album_cover(&self, album_id: i64) -> Result<Option<(String, Vec<u8>)>, AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let row = mimir_core::db::album_cover(&conn, album_id)?;
+        Ok(row.map(|c| (c.mime_type, c.data)))
+    }
+
     pub fn transport(&self) -> Transport {
         self.inner.lock().expect("state poisoned").transport.clone()
     }

@@ -52,6 +52,17 @@ pub fn library_search(
     state.search(&query, limit.unwrap_or(50))
 }
 
+/// Cover art for an album as `(mime_type, bytes)`. `None` when the album
+/// has no embedded (or fetched) cover.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_album_cover(
+    state: tauri::State<'_, AppState>,
+    album_id: i64,
+) -> Result<Option<(String, Vec<u8>)>, AppError> {
+    state.album_cover(album_id)
+}
+
 /// Start (or replace) playback with the given track id.
 #[cfg(feature = "tauri")]
 #[tauri::command]
