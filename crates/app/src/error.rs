@@ -48,6 +48,18 @@ impl From<mimir_core::db::DbError> for AppError {
     }
 }
 
+impl From<mimir_core::scanner::ScanError> for AppError {
+    fn from(e: mimir_core::scanner::ScanError) -> Self {
+        match e {
+            mimir_core::scanner::ScanError::Sqlite(s) => Self::Sqlite(s.to_string()),
+            mimir_core::scanner::ScanError::NotFound(path)
+            | mimir_core::scanner::ScanError::NotADirectory(path) => {
+                Self::PathNotFound(path.to_string_lossy().into_owned())
+            }
+        }
+    }
+}
+
 #[cfg(feature = "tauri")]
 impl From<mimir_core::db::UpdateError> for AppError {
     fn from(e: mimir_core::db::UpdateError) -> Self {

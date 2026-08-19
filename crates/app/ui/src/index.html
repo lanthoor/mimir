@@ -55,8 +55,12 @@
       <form method="dialog">
         <label>
           Folder path
-          <input id="add-folder-path" type="text" placeholder="/abs/path/to/music" />
+          <div class="folder-input-row">
+            <input id="add-folder-path" type="text" placeholder="/abs/path/to/music" />
+            <button id="add-folder-browse" type="button">Browse…</button>
+          </div>
         </label>
+        <div id="add-folder-info" class="add-folder-info"></div>
         <menu>
           <button value="cancel">Cancel</button>
           <button id="add-folder-confirm" value="default">Add</button>

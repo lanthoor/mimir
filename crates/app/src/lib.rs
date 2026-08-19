@@ -18,6 +18,7 @@ pub use state::AppState;
 #[cfg(feature = "tauri")]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state::AppState::new())
         .invoke_handler(tauri::generate_handler![
             command::library_open,

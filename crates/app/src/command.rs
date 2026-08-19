@@ -31,28 +31,49 @@ pub fn library_status(state: tauri::State<'_, AppState>) -> LibraryStatus {
     state.library_status()
 }
 
-/// Enqueue a folder for scanning. Returns the folder row id.
+/// Enqueue a folder for scanning. Returns the folder row id plus a
+/// summary so the UI can tell the user "no audio files found" etc.
+#[cfg(feature = "tauri")]
+#[derive(Debug, serde::Serialize, Clone)]
+pub struct AddFolderResult {
+    pub folder_id: i64,
+    pub summary: mimir_core::scanner::ScanSummary,
+}
+
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn library_add_folder(
     state: tauri::State<'_, AppState>,
     path: String,
-) -> Result<i64, AppError> {
-    state.add_folder(Path::new(&path))
+) -> Result<AddFolderResult, AppError> {
+    let (id, summary) = state.add_folder(Path::new(&path))?;
+    Ok(AddFolderResult { folder_id: id, summary })
 }
 
-/// Add multiple folders in one call. Returns the list of folder row ids.
+/// Add multiple folders in one call. Returns one `AddFolderResult` per path
+/// (in the same order) so the UI can surface per-folder outcomes.
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn library_add_folders(
     state: tauri::State<'_, AppState>,
     paths: Vec<String>,
-) -> Result<Vec<i64>, AppError> {
-    let mut ids = Vec::with_capacity(paths.len());
+) -> Result<Vec<AddFolderResult>, AppError> {
+    let mut out = Vec::with_capacity(paths.len());
     for p in paths {
-        ids.push(state.add_folder(Path::new(&p))?);
+        let (id, summary) = state.add_folder(Path::new(&p))?;
+        out.push(AddFolderResult {
+            folder_id: id,
+            summary,
+        });
     }
-    Ok(ids)
+    Ok(out)
+}
+
+#[cfg(feature = "tauri")]
+impl From<(i64, mimir_core::scanner::ScanSummary)> for AddFolderResult {
+    fn from((folder_id, summary): (i64, mimir_core::scanner::ScanSummary)) -> Self {
+        Self { folder_id, summary }
+    }
 }
 
 /// Full-text search across the library. Returns matching tracks.

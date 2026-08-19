@@ -21,6 +21,7 @@ walkdir = "2"
 blake3 = "1"
 lofty = "0.21"
 serde = { version = "1", features = ["derive"] }
+mimir-telemetry = { path = "../telemetry" }
 
 [dev-dependencies]
 tempfile = "3"

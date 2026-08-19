@@ -7,7 +7,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
+use mimir_telemetry as telemetry;
 use rusqlite::{Connection, OptionalExtension};
+use thiserror::Error;
 
 use super::hash::{hash_file, FileHash};
 use super::upsert::upsert_folder;
@@ -21,35 +23,160 @@ pub struct ScanJob {
     pub file_hash: FileHash,
 }
 
+#[derive(Debug, Error)]
+pub enum ScanError {
+    #[error("sqlite: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("folder does not exist: {0}")]
+    NotFound(PathBuf),
+    #[error("path is not a directory: {0}")]
+    NotADirectory(PathBuf),
+}
+
+/// Diagnostic summary returned by a successful `scan_root`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct ScanSummary {
+    /// Files visited by the recursive walk.
+    pub walked: u64,
+    /// New `ScanJob`s emitted (not previously seen by `(path_hash, mtime_ns, size_bytes)`).
+    pub sent: u64,
+    /// Files that already had a matching track row.
+    pub known: u64,
+    /// Files that disappeared or were unreadable between walk and hash.
+    pub hashed_fail: u64,
+}
+
 /// Walk `root`, upsert the folder row, and emit a `ScanJob` for every
 /// audio file that does not already match an existing `track` row.
 ///
-/// A `track` row is considered "known" when its `(path_hash, mtime_ns,
-/// size_bytes)` triple matches — same content + same mtime + same size. This
-/// triple survives renames, so re-scans are cheap.
-///
 /// `tx` is taken by value so the channel is closed when this function
 /// returns, letting the receiver's `recv()` exit on its own.
+///
+/// `ScanError::NotFound` / `NotADirectory` are returned up-front so the
+/// front-end can show a clear diagnostic; an empty reachable directory
+/// still succeeds with a zero-count `ScanSummary`.
 #[allow(clippy::needless_pass_by_value)]
-pub fn scan_root(conn: &Connection, root: &Path, tx: Sender<ScanJob>) -> rusqlite::Result<()> {
-    let folder_id = upsert_folder(conn, root)?;
+pub fn scan_root(
+    conn: &Connection,
+    root: &Path,
+    tx: Sender<ScanJob>,
+) -> Result<ScanSummary, ScanError> {
+    telemetry::log(
+        "INFO",
+        "scanner",
+        &format!("scan_root start root={}", root.display()),
+    );
+    let metadata = match std::fs::metadata(root) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            telemetry::log(
+                "WARN",
+                "scanner",
+                &format!("scan_root root not found: {}", root.display()),
+            );
+            return Err(ScanError::NotFound(root.to_path_buf()));
+        }
+        Err(e) => {
+            telemetry::log(
+                "ERROR",
+                "scanner",
+                &format!("scan_root metadata error on {}: {}", root.display(), e),
+            );
+            return Err(ScanError::NotFound(root.to_path_buf()));
+        }
+    };
+    if !metadata.is_dir() {
+        telemetry::log(
+            "WARN",
+            "scanner",
+            &format!("scan_root not a directory: {}", root.display()),
+        );
+        return Err(ScanError::NotADirectory(root.to_path_buf()));
+    }
+
+    let folder_id = match upsert_folder(conn, root) {
+        Ok(id) => {
+            telemetry::log("DEBUG", "scanner", &format!("upsert_folder ok id={id}"));
+            id
+        }
+        Err(e) => {
+            telemetry::log(
+                "ERROR",
+                "scanner",
+                &format!("upsert_folder failed for {}: {e}", root.display()),
+            );
+            return Err(ScanError::Sqlite(e));
+        }
+    };
+
+    let mut walked = 0u64;
+    let mut sent = 0u64;
+    let mut known = 0u64;
+    let mut hashed_fail = 0u64;
     for path in walk_audio_files(root) {
+        walked += 1;
         let Ok(file_hash) = hash_file(&path) else {
-            // File vanished or unreadable between walk and hash — drop.
+            hashed_fail += 1;
+            telemetry::log(
+                "WARN",
+                "scanner",
+                &format!("hash_file failed for {}", path.display()),
+            );
             continue;
         };
 
         if is_known(conn, &file_hash)? {
+            known += 1;
+            telemetry::log(
+                "DEBUG",
+                "scanner",
+                &format!("dedupe hit path={}", path.display()),
+            );
             continue;
         }
 
-        let _ = tx.send(ScanJob {
-            folder_id,
-            path,
-            file_hash,
-        });
+        if tx
+            .send(ScanJob {
+                folder_id,
+                path: path.clone(),
+                file_hash,
+            })
+            .is_ok()
+        {
+            sent += 1;
+        } else {
+            telemetry::log(
+                "ERROR",
+                "scanner",
+                &format!("ScanJob send failed (channel closed) path={}", path.display()),
+            );
+        }
     }
-    Ok(())
+
+telemetry::log(
+        "INFO",
+        "scanner",
+        &format!(
+            "scan_root done root={root} folder_id={folder_id} walked={walked} sent={sent} known={known} hash_fail={hashed_fail}",
+            root = root.display()
+        ),
+    );
+    if sent == 0 && hashed_fail == 0 && walked == 0 {
+        telemetry::log(
+            "WARN",
+            "scanner",
+            &format!(
+                "scan_root empty root={} walked=0 — directory may be empty or contain no audio files",
+                root.display()
+            ),
+        );
+    }
+    Ok(ScanSummary {
+        walked,
+        sent,
+        known,
+        hashed_fail,
+    })
 }
 
 fn is_known(conn: &Connection, h: &FileHash) -> rusqlite::Result<bool> {

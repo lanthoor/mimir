@@ -29,6 +29,11 @@ pub fn parse_filename(path: &Path) -> Option<HeuristicTags> {
         .collect();
 
     if components.is_empty() {
+        mimir_telemetry::log(
+            "DEBUG",
+            "metadata",
+            &format!("heuristic: empty components path={}", path.display()),
+        );
         return None;
     }
 
@@ -43,6 +48,11 @@ pub fn parse_filename(path: &Path) -> Option<HeuristicTags> {
 
     // Need at least 2 ancestors: grandparent = artist, parent = album.
     if n < 3 {
+        mimir_telemetry::log(
+            "DEBUG",
+            "metadata",
+            &format!("heuristic: shallow path (n={n}) path={}", path.display()),
+        );
         return None;
     }
 
@@ -52,6 +62,14 @@ pub fn parse_filename(path: &Path) -> Option<HeuristicTags> {
 
     let (track_no, title) = parse_leaf(&leaf);
 
+    mimir_telemetry::log(
+        "DEBUG",
+        "metadata",
+        &format!(
+            "heuristic: parsed path={} artist={artist:?} album={album:?} track_no={track_no:?} title={title:?}",
+            path.display()
+        ),
+    );
     Some(HeuristicTags {
         artist: Some(artist),
         album: Some(album),

@@ -1,6 +1,7 @@
 //! Domain events emitted by the file watcher.
 
 use std::path::Path;
+use std::path::PathBuf;
 
 /// What happened to a file on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,8 +15,6 @@ pub enum EventKind {
     /// The file was renamed from `from` to `to`.
     Renamed { from: PathBuf, to: PathBuf },
 }
-
-use std::path::PathBuf;
 
 /// A single ingest-relevant filesystem event.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -27,6 +27,11 @@ pub fn list_tracks(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<TrackRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("list_tracks limit={limit} offset={offset}"),
+    );
     let mut stmt = conn.prepare(
         "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
                 t.genre, a.year, \
@@ -41,6 +46,11 @@ pub fn list_tracks(
     let rows = stmt
         .query_map(rusqlite::params![limit, offset], row_to_track)?
         .collect::<Result<Vec<_>, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_tracks returned n={}", rows.len()),
+    );
     Ok(rows)
 }
 
@@ -70,6 +80,7 @@ pub struct GenreRow {
 }
 
 pub fn list_genres(conn: &Connection) -> Result<Vec<GenreRow>, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "list_genres");
     let mut stmt = conn.prepare(
         "SELECT genre, COUNT(*) \
          FROM track \
@@ -84,6 +95,11 @@ pub fn list_genres(conn: &Connection) -> Result<Vec<GenreRow>, rusqlite::Error> 
         })
     })?;
     let out: Vec<GenreRow> = rows.collect::<Result<_, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_genres returned n={}", out.len()),
+    );
     Ok(out)
 }
 
@@ -95,6 +111,7 @@ pub struct YearRow {
 }
 
 pub fn list_years(conn: &Connection) -> Result<Vec<YearRow>, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "list_years");
     let mut stmt = conn.prepare(
         "SELECT a.year, COUNT(t.id) \
          FROM album a JOIN track t ON t.album_id = a.id \
@@ -109,5 +126,10 @@ pub fn list_years(conn: &Connection) -> Result<Vec<YearRow>, rusqlite::Error> {
         })
     })?;
     let out: Vec<YearRow> = rows.collect::<Result<_, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_years returned n={}", out.len()),
+    );
     Ok(out)
 }

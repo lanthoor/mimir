@@ -18,6 +18,7 @@ use mimir_core::db::Library;
 #[cfg(feature = "tauri")]
 use mimir_core::rusqlite;
 use mimir_core::scanner::ScanJob;
+use mimir_telemetry as telemetry;
 use serde::Serialize;
 
 use crate::error::AppError;
@@ -56,13 +57,34 @@ impl AppState {
     /// is captured in `library_status` and the user can recover by
     /// calling `library_open` with a different path.
     pub fn new() -> Self {
+        // Best-effort init; missing home is logged via stderr already.
+        let _log_guard = telemetry::init();
+        telemetry::log("INFO", "app", "mimir starting up");
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("version={} toolchain=stable", env!("CARGO_PKG_VERSION")),
+        );
+
         let state = Self::default();
         let path = default_library_path();
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("implicit open target path={}", path.display()),
+        );
         if let Err(e) = state.open_library(&path) {
-            // `open_library` already updates the status on failure; this
-            // branch is here for documentation. Don't re-error.
-            let _ = e;
+            telemetry::log(
+                "WARN",
+                "app",
+                &format!("implicit library open failed: {e}"),
+            );
         }
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("AppState ready is_open={} path={:?}", state.is_open(), state.library_status().path),
+        );
         state
     }
 
@@ -74,18 +96,33 @@ impl AppState {
     /// state consistent: either the library at `status.path` is open, or
     /// it's not.
     pub fn open_library(&self, path: &Path) -> Result<(), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("open_library requested path={}", path.display()),
+        );
         let mut inner = self.inner.lock().expect("state poisoned");
         inner.status.path = Some(path.to_path_buf());
         match Library::open(path) {
             Ok(lib) => {
                 inner.library = Some(lib);
                 inner.status.last_error = None;
+                telemetry::log(
+                    "INFO",
+                    "app",
+                    &format!("open_library ok path={}", path.display()),
+                );
                 Ok(())
             }
             Err(e) => {
                 let msg = e.to_string();
                 inner.library = None;
-                inner.status.last_error = Some(msg);
+                inner.status.last_error = Some(msg.clone());
+                telemetry::log(
+                    "ERROR",
+                    "app",
+                    &format!("open_library failed path={} err={msg}", path.display()),
+                );
                 Err(AppError::from(e))
             }
         }
@@ -108,7 +145,10 @@ impl AppState {
         let lib = inner
             .library
             .clone()
-            .ok_or_else(|| AppError::Internal("library not opened yet".into()))?;
+            .ok_or_else(|| {
+                telemetry::log("WARN", "app", "library() called without an open library");
+                AppError::Internal("library not opened yet".into())
+            })?;
         drop(inner);
         Ok(lib)
     }
@@ -116,20 +156,52 @@ impl AppState {
     /// Enqueue a folder for scanning. The actual scan is async — this
     /// command returns once the folder row is upserted. A scan worker drains
     /// the channel on a background thread.
-    pub fn add_folder(&self, root: &Path) -> Result<i64, AppError> {
+    pub fn add_folder(
+        &self,
+        root: &Path,
+    ) -> Result<(i64, mimir_core::scanner::ScanSummary), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("add_folder start root={}", root.display()),
+        );
         let lib = self.library()?;
         let conn = lib.conn()?;
-        let folder_id = mimir_core::scanner::upsert_folder(&conn, root)?;
+        let folder_id = match mimir_core::scanner::upsert_folder(&conn, root) {
+            Ok(id) => {
+                telemetry::log(
+                    "DEBUG",
+                    "app",
+                    &format!("add_folder: upsert_folder ok id={id}"),
+                );
+                id
+            }
+            Err(e) => {
+                telemetry::log(
+                    "ERROR",
+                    "app",
+                    &format!("add_folder: upsert_folder failed root={} err={e}", root.display()),
+                );
+                return Err(e.into());
+            }
+        };
 
         // Spawn a worker on first call.
         let mut inner = self.inner.lock().expect("state poisoned");
         if inner.scan_tx.is_none() {
             let (tx, rx) = channel::<ScanJob>();
             let worker_lib = lib.clone();
+            let target = root.to_path_buf();
             std::thread::spawn(move || {
+                telemetry::log(
+                    "INFO",
+                    "app",
+                    &format!("scan worker thread spawned target={}", target.display()),
+                );
                 mimir_core::metadata::run_worker(&worker_lib.conn().expect("conn"), rx);
             });
             inner.scan_tx = Some(tx);
+            telemetry::log("INFO", "app", "scan_tx initialised");
         }
         drop(inner);
 
@@ -143,22 +215,88 @@ impl AppState {
             .expect("scan_tx")
             .clone();
         let conn = lib.conn()?;
-        mimir_core::scanner::scan_root(&conn, root, tx)?;
-        Ok(folder_id)
+        match mimir_core::scanner::scan_root(&conn, root, tx) {
+            Ok(summary) => {
+                if summary.sent == 0 {
+                    telemetry::log(
+                        "WARN",
+                        "app",
+                        &format!(
+                            "add_folder scanned but found no audio files root={} walked={} hashed_fail={} known={}",
+                            root.display(),
+                            summary.walked,
+                            summary.hashed_fail,
+                            summary.known
+                        ),
+                    );
+                } else {
+                    telemetry::log(
+                        "INFO",
+                        "app",
+                        &format!(
+                            "add_folder ok folder_id={folder_id} root={} sent={} known={} walked={}",
+                            root.display(),
+                            summary.sent,
+                            summary.known,
+                            summary.walked
+                        ),
+                    );
+                }
+                Ok((folder_id, summary))
+            }
+            Err(e) => {
+                telemetry::log(
+                    "ERROR",
+                    "app",
+                    &format!(
+                        "add_folder scan_root failed folder_id={folder_id} root={} err={e}",
+                        root.display()
+                    ),
+                );
+                Err(e.into())
+            }
+        }
     }
 
     /// Add multiple folders in one go. Each is upserted by path so re-adding
     /// the same root is a no-op. Workers drain scan jobs on a shared thread.
-    pub fn add_folders<I, P>(&self, paths: I) -> Result<Vec<i64>, AppError>
+    pub fn add_folders<I, P>(
+        &self,
+        paths: I,
+    ) -> Result<
+        Vec<(i64, mimir_core::scanner::ScanSummary)>,
+        AppError,
+    >
     where
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
-        let mut ids = Vec::new();
+        telemetry::log("INFO", "app", "add_folders enter batch");
+        let mut out: Vec<(i64, mimir_core::scanner::ScanSummary)> = Vec::new();
+        let mut n = 0u64;
         for p in paths {
-            ids.push(self.add_folder(p.as_ref())?);
+            n += 1;
+            match self.add_folder(p.as_ref()) {
+                Ok(r) => out.push(r),
+                Err(e) => {
+                    telemetry::log(
+                        "ERROR",
+                        "app",
+                        &format!(
+                            "add_folders child #{n} failed path={} err={e}",
+                            p.as_ref().display()
+                        ),
+                    );
+                    return Err(e);
+                }
+            }
         }
-        Ok(ids)
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("add_folders done ok={} attempted={n}", out.len()),
+        );
+        Ok(out)
     }
 
     pub fn search(
@@ -166,22 +304,16 @@ impl AppState {
         query: &str,
         limit: i64,
     ) -> Result<Vec<mimir_core::query::TrackRow>, AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("search query={query:?} limit={limit}"),
+        );
         let lib = self.library()?;
         let conn = lib.conn()?;
-        Ok(mimir_core::query::search_tracks(&conn, query, limit)?)
-    }
-
-    /// Paged list of tracks. Used for the Tracks view's default render —
-    /// FTS5's `MATCH ''` syntax-errors so a bare search box has to come
-    /// through here.
-    pub fn list_tracks(
-        &self,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<mimir_core::query::TrackRow>, AppError> {
-        let lib = self.library()?;
-        let conn = lib.conn()?;
-        Ok(mimir_core::query::list_tracks(&conn, limit, offset)?)
+        let out = mimir_core::query::search_tracks(&conn, query, limit)?;
+        telemetry::log("INFO", "app", &format!("search ok n={}", out.len()));
+        Ok(out)
     }
 
     /// Return the cover art attached to `album_id`, if any. The cover is
@@ -191,9 +323,22 @@ impl AppState {
     // degrade the WebView serialise step. Switch to a Tauri channel and
     // stream bytes if user libraries routinely hold >5 MB scans.
     pub fn album_cover(&self, album_id: i64) -> Result<Option<(String, Vec<u8>)>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("album_cover request album_id={album_id}"),
+        );
         let lib = self.library()?;
         let conn = lib.conn()?;
         let row = mimir_core::db::album_cover(&conn, album_id)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "album_cover ok album_id={album_id} present={}",
+                row.is_some()
+            ),
+        );
         Ok(row.map(|c| (c.mime_type, c.data)))
     }
 
@@ -203,23 +348,55 @@ impl AppState {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<mimir_core::query::AlbumRow>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("list_albums limit={limit} offset={offset}"),
+        );
         let lib = self.library()?;
         let conn = lib.conn()?;
-        Ok(mimir_core::query::list_albums(&conn, limit, offset)?)
+        let out = mimir_core::query::list_albums(&conn, limit, offset)?;
+        telemetry::log("INFO", "app", &format!("list_albums ok n={}", out.len()));
+        Ok(out)
     }
 
     /// Distinct genres in the library.
     pub fn list_genres(&self) -> Result<Vec<mimir_core::query::GenreRow>, AppError> {
+        telemetry::log("DEBUG", "app", "list_genres request");
         let lib = self.library()?;
         let conn = lib.conn()?;
-        Ok(mimir_core::query::list_genres(&conn)?)
+        let out = mimir_core::query::list_genres(&conn)?;
+        telemetry::log("INFO", "app", &format!("list_genres ok n={}", out.len()));
+        Ok(out)
     }
 
     /// Distinct years (from albums) in the library.
     pub fn list_years(&self) -> Result<Vec<mimir_core::query::YearRow>, AppError> {
+        telemetry::log("DEBUG", "app", "list_years request");
         let lib = self.library()?;
         let conn = lib.conn()?;
-        Ok(mimir_core::query::list_years(&conn)?)
+        let out = mimir_core::query::list_years(&conn)?;
+        telemetry::log("INFO", "app", &format!("list_years ok n={}", out.len()));
+        Ok(out)
+    }
+
+    /// Tracks filtered by an optional combination of facets.
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_tracks(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::TrackRow>, AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("list_tracks limit={limit} offset={offset}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_tracks(&conn, limit, offset)?;
+        telemetry::log("INFO", "app", &format!("list_tracks ok n={}", out.len()));
+        Ok(out)
     }
 
     /// Tracks filtered by an optional combination of facets.
@@ -233,6 +410,13 @@ impl AppState {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<mimir_core::query::TrackRow>, AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "query_tracks_filtered genre={genre:?} year={year:?} artist_id={artist_id:?} album_id={album_id:?} limit={limit} offset={offset}"
+            ),
+        );
         let lib = self.library()?;
         let conn = lib.conn()?;
         let filter = mimir_core::query::TrackFilter {
@@ -241,9 +425,13 @@ impl AppState {
             artist_id,
             album_id,
         };
-        Ok(mimir_core::query::list_tracks_filtered(
-            &conn, &filter, limit, offset,
-        )?)
+        let out = mimir_core::query::list_tracks_filtered(&conn, &filter, limit, offset)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("query_tracks_filtered ok n={}", out.len()),
+        );
+        Ok(out)
     }
 
     /// Fetch the editable subset of a track.
@@ -252,6 +440,11 @@ impl AppState {
         &self,
         track_id: i64,
     ) -> Result<crate::command::EditableTrackFields, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("get_editable_track track_id={track_id}"),
+        );
         use crate::command::EditableTrackFields;
         let lib = self.library()?;
         let conn = lib.conn()?;
@@ -279,10 +472,30 @@ impl AppState {
             )
             .map_err(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => {
+                    telemetry::log(
+                        "WARN",
+                        "app",
+                        &format!("get_editable_track no row for track_id={track_id}"),
+                    );
                     AppError::Internal(format!("no track with id {track_id}"))
                 }
-                other => AppError::Sqlite(other.to_string()),
+                other => {
+                    telemetry::log(
+                        "ERROR",
+                        "app",
+                        &format!("get_editable_track sqlite err track_id={track_id} err={other}"),
+                    );
+                    AppError::Sqlite(other.to_string())
+                }
             })?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "get_editable_track ok track_id={track_id} title={:?} genre={:?} year={:?} tno={:?} dno={:?}",
+                row.0, row.1, row.2, row.3, row.4
+            ),
+        );
         Ok(EditableTrackFields {
             title: row.0,
             genre: row.1,
@@ -299,9 +512,15 @@ impl AppState {
         track_id: i64,
         patch: mimir_core::db::TrackPatch,
     ) -> Result<(), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("update_track track_id={track_id} patch={patch:?}"),
+        );
         let lib = self.library()?;
         let conn = lib.conn()?;
         mimir_core::db::update_track(&conn, track_id, &patch)?;
+        telemetry::log("INFO", "app", &format!("update_track ok track_id={track_id}"));
         Ok(())
     }
 
@@ -311,9 +530,24 @@ impl AppState {
         &self,
         track_id: i64,
     ) -> Result<Option<mimir_core::db::LyricsRow>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("track_lyrics track_id={track_id}"),
+        );
         let lib = self.library()?;
         let conn = lib.conn()?;
-        Ok(mimir_core::db::track_lyrics(&conn, track_id)?)
+        let out = mimir_core::db::track_lyrics(&conn, track_id)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "track_lyrics ok track_id={track_id} present={} bytes={}",
+                out.is_some(),
+                out.as_ref().map(|r| r.text.len()).unwrap_or(0)
+            ),
+        );
+        Ok(out)
     }
 
     pub fn transport(&self) -> Transport {
@@ -321,6 +555,7 @@ impl AppState {
     }
 
     pub fn send_transport(&self, cmd: TransportCommand) {
+        telemetry::log("DEBUG", "app", &format!("send_transport {cmd:?}"));
         let mut inner = self.inner.lock().expect("state poisoned");
         inner.transport.dispatch(cmd);
     }
@@ -335,6 +570,11 @@ impl AppState {
         track_id: i64,
         transport_cmd: &TransportCommand,
     ) -> Result<(), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("play_track track_id={track_id} transport_cmd={transport_cmd:?}"),
+        );
         // Update the transport state first so the UI sees Playing immediately.
         self.send_transport(transport_cmd.clone());
 
@@ -350,15 +590,26 @@ impl AppState {
             )
             .ok();
         let Some((path_str, track_db, album_db)) = row else {
+            telemetry::log(
+                "WARN",
+                "app",
+                &format!("play_track: no row track_id={track_id}"),
+            );
             return Err(AppError::Internal(format!("no track with id {track_id}")));
         };
         let path = PathBuf::from(path_str);
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("play_track path={} rg_track={track_db:?} rg_album={album_db:?}", path.display()),
+        );
 
         #[cfg(feature = "output")]
         {
             use mimir_audio::PlayerCommand;
             let mut inner = self.inner.lock().expect("state poisoned");
             if inner.player.is_none() {
+                telemetry::log("INFO", "app", "instantiating audio Player");
                 inner.player = Some(mimir_audio::Player::new());
             }
             let player = inner.player.as_ref().expect("just initialized");
@@ -367,22 +618,39 @@ impl AppState {
             player
                 .handle()
                 .send(PlayerCommand::SetReplayGainDb(gain))
-                .map_err(AppError::from)?;
-            player
-                .handle()
-                .send(PlayerCommand::Play(path))
-                .map_err(AppError::from)?;
+                .map_err(|e| {
+                    telemetry::log(
+                        "ERROR",
+                        "app",
+                        &format!("play_track: SetReplayGainDb send err: {e}"),
+                    );
+                    AppError::from(e)
+                })?;
+            player.handle().send(PlayerCommand::Play(path.clone())).map_err(|e| {
+                telemetry::log(
+                    "ERROR",
+                    "app",
+                    &format!("play_track: Play send err path={}: {e}", path.display()),
+                );
+                AppError::from(e)
+            })?;
         }
 
         // When the `output` feature is off, the transport state is the only
         // signal we have. The legacy `transport` is still useful for the UI.
         #[cfg(not(feature = "output"))]
         {
+            telemetry::log(
+                "DEBUG",
+                "app",
+                "play_track: output feature off — transport-only update",
+            );
             let _ = path;
             let _ = track_db;
             let _ = album_db;
         }
 
+        telemetry::log("INFO", "app", &format!("play_track ok track_id={track_id}"));
         Ok(())
     }
 
@@ -390,6 +658,7 @@ impl AppState {
     /// feature is disabled.
     #[cfg(feature = "output")]
     pub fn player_snapshot(&self) -> Option<mimir_audio::PlayerSnapshot> {
+        telemetry::log("DEBUG", "app", "player_snapshot");
         let inner = self.inner.lock().expect("state poisoned");
         inner.player.as_ref().map(mimir_audio::Player::snapshot)
     }

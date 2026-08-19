@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+use mimir_telemetry as telemetry;
 use thiserror::Error;
 
 /// 32-byte blake3 content hash of an audio file plus the filesystem
@@ -32,7 +33,17 @@ pub enum HashError {
 /// cheap to compare and survives renames) and as a stable identifier of the
 /// file's bytes.
 pub fn hash_file(path: &Path) -> Result<FileHash, HashError> {
+    telemetry::log(
+        "DEBUG",
+        "scanner",
+        &format!("hash_file start path={}", path.display()),
+    );
     let bytes = fs::read(path)?;
+    telemetry::log(
+        "DEBUG",
+        "scanner",
+        &format!("hash_file read {} bytes from {}", bytes.len(), path.display()),
+    );
     let path_hash: [u8; 32] = blake3::hash(&bytes).into();
 
     let meta = fs::metadata(path)?;
@@ -43,6 +54,16 @@ pub fn hash_file(path: &Path) -> Result<FileHash, HashError> {
         .map_err(|_| HashError::MtimeBeforeEpoch)?;
     let mtime_ns = i64::try_from(mtime.as_nanos()).map_err(|_| HashError::MtimeBeforeEpoch)?;
 
+    telemetry::log(
+        "DEBUG",
+        "scanner",
+        &format!(
+            "hash_file ok path={} size={} mtime_ns={}",
+            path.display(),
+            size_bytes,
+            mtime_ns
+        ),
+    );
     Ok(FileHash {
         path_hash,
         mtime_ns,

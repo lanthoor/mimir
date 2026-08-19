@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::db::{attach_album_cover, upsert_lyrics};
 use crate::scanner::ScanJob;
+use mimir_telemetry as telemetry;
 
 use super::extract::{extract_tags, Tags};
 use super::heuristic::{parse_filename, HeuristicTags};
@@ -36,28 +37,97 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
         file_hash,
     } = job;
 
-    let probe = probe_or_default(&path)?;
-    let mut tags = extract_tags(&path).unwrap_or_default();
+    telemetry::log(
+        "INFO",
+        "ingest",
+        &format!(
+            "ingest start folder_id={folder_id} path={}",
+            path.display()
+        ),
+    );
+
+    let probe = match probe_or_default(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            telemetry::log(
+                "ERROR",
+                "ingest",
+                &format!("probe failed path={} err={e}", path.display()),
+            );
+            return Err(e);
+        }
+    };
+    telemetry::log(
+        "DEBUG",
+        "ingest",
+        &format!("probe result path={} codec={}", path.display(), probe.codec),
+    );
+
+    let mut tags = match extract_tags(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            telemetry::log(
+                "WARN",
+                "ingest",
+                &format!("extract_tags err using default path={} err={e}", path.display()),
+            );
+            Tags::default()
+        }
+    };
     apply_heuristic(&path, &mut tags);
 
     let artist_name = tags.artist.as_deref().or(tags.album_artist.as_deref());
     let artist_id = match artist_name {
-        Some(name) => upsert_artist(conn, name)?,
-        None => conn.query_row(
-            "SELECT id FROM artist WHERE name = 'Unknown Artist'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )?,
+        Some(name) => {
+            let id = upsert_artist(conn, name)?;
+            telemetry::log(
+                "DEBUG",
+                "ingest",
+                &format!("artist upserted id={id} name={name}"),
+            );
+            id
+        }
+        None => {
+            let id: i64 = conn.query_row(
+                "SELECT id FROM artist WHERE name = 'Unknown Artist'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?;
+            telemetry::log(
+                "DEBUG",
+                "ingest",
+                &format!("artist fallback Unknown Artist id={id}"),
+            );
+            id
+        }
     };
 
     let album_id = if let Some(album_title) = tags.album.as_deref() {
-        Some(upsert_album(conn, album_title, artist_id, tags.year)?)
+        let id = upsert_album(conn, album_title, artist_id, tags.year)?;
+        telemetry::log(
+            "DEBUG",
+            "ingest",
+            &format!("album upserted id={id} title={album_title} year={:?}", tags.year),
+        );
+        Some(id)
     } else {
+        telemetry::log("DEBUG", "ingest", "no album title → album_id=None");
         None
     };
 
     if let (Some(album_id), Ok(Some(cover))) = (album_id, extract_cover(&path)) {
-        attach_album_cover(conn, album_id, &cover, "embedded")?;
+        match attach_album_cover(conn, album_id, &cover, "embedded") {
+            Ok(_) => telemetry::log(
+                "DEBUG",
+                "ingest",
+                &format!("cover attached album_id={album_id} mime={}", cover.mime_type),
+            ),
+            Err(e) => telemetry::log(
+                "WARN",
+                "ingest",
+                &format!("attach_album_cover failed album_id={album_id} err={e}"),
+            ),
+        }
     }
 
     let tx = conn.unchecked_transaction()?;
@@ -73,7 +143,7 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
     let track_no = tags.track_no.map(i64::from);
     let disc_no = tags.disc_no.map(i64::from);
 
-    tx.execute(
+    let updated = tx.execute(
         "INSERT INTO track (\
             path, path_hash, mtime_ns, size_bytes, codec, duration_ms, sample_rate, \
             channels, bitrate, title, genre, replaygain_track_db, replaygain_album_db, \
@@ -108,6 +178,11 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
             folder_id,
         ],
     )?;
+    telemetry::log(
+        "DEBUG",
+        "ingest",
+        &format!("track upsert changed={updated} path={path_str}"),
+    );
 
     let track_id: i64 = tx.query_row(
         "SELECT id FROM track WHERE path_hash = ?1 AND mtime_ns = ?2 AND size_bytes = ?3",
@@ -120,17 +195,43 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
     )?;
 
     if let Some(lyrics) = tags.lyrics.as_deref() {
-        upsert_lyrics(conn, track_id, lyrics, "und", "embedded")?;
+        match upsert_lyrics(conn, track_id, lyrics, "und", "embedded") {
+            Ok(_) => telemetry::log(
+                "DEBUG",
+                "ingest",
+                &format!("lyrics attached track_id={track_id} bytes={}", lyrics.len()),
+            ),
+            Err(e) => telemetry::log(
+                "WARN",
+                "ingest",
+                &format!("lyrics upsert failed track_id={track_id} err={e}"),
+            ),
+        }
     }
 
     tx.commit()?;
+    telemetry::log(
+        "INFO",
+        "ingest",
+        &format!(
+            "ingest done track_id={track_id} folder_id={folder_id} codec={codec} title={title:?} album_id={album_id:?} artist_id={artist_id} path={}",
+            path.display()
+        ),
+    );
     Ok(track_id)
 }
 
 fn probe_or_default(path: &Path) -> Result<Probe, IngestError> {
-    probe_file(path).map_err(|e| match e {
-        ProbeError::Lofty(s) | ProbeError::UnknownExtension(s) => IngestError::Probe(s),
-        ProbeError::Io(io) => IngestError::Io(io),
+    probe_file(path).map_err(|e| {
+        telemetry::log(
+            "WARN",
+            "ingest",
+            &format!("probe_or_default fallback err={e}"),
+        );
+        match e {
+            ProbeError::Lofty(s) | ProbeError::UnknownExtension(s) => IngestError::Probe(s),
+            ProbeError::Io(io) => IngestError::Io(io),
+        }
     })
 }
 
@@ -142,6 +243,7 @@ fn apply_heuristic(path: &Path, tags: &mut Tags) {
         title,
     }) = parse_filename(path)
     {
+        let before = tags.clone();
         if tags.artist.is_none() && tags.album_artist.is_none() {
             tags.artist = artist;
         }
@@ -154,17 +256,40 @@ fn apply_heuristic(path: &Path, tags: &mut Tags) {
         if tags.title.is_none() {
             tags.title = title;
         }
+        telemetry::log(
+            "DEBUG",
+            "ingest",
+            &format!(
+                "heuristic merged path={} before={:?} after={:?}",
+                path.display(),
+                before,
+                tags
+            ),
+        );
     }
 }
 
 /// Drain `rx` and call `ingest` for each job. Returns when the sender
-/// closes the channel. Per-job errors are logged to stderr; the worker
-/// keeps going.
+/// closes the channel. Per-job errors are logged to the file (and stderr).
+/// The worker keeps going.
 #[allow(clippy::needless_pass_by_value)]
 pub fn run_worker(conn: &Connection, rx: std::sync::mpsc::Receiver<ScanJob>) {
+    telemetry::log("INFO", "worker", "run_worker started");
+    let mut processed = 0u64;
     while let Ok(job) = rx.recv() {
+        processed += 1;
+        telemetry::log(
+            "DEBUG",
+            "worker",
+            &format!("recv job n={processed} folder_id={} path={}", job.folder_id, job.path.display()),
+        );
         if let Err(e) = ingest(conn, job) {
-            eprintln!("ingest error: {e}");
+            telemetry::log("ERROR", "ingest", &format!("{e}"));
         }
     }
+    telemetry::log(
+        "INFO",
+        "worker",
+        &format!("run_worker stopping after {processed} jobs"),
+    );
 }
