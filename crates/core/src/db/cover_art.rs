@@ -94,10 +94,7 @@ pub fn album_cover(conn: &Connection, album_id: i64) -> Result<Option<CoverRow>,
     mimir_telemetry::log(
         "INFO",
         "cover",
-        &format!(
-            "album_cover album_id={album_id} present={}",
-            out.is_some()
-        ),
+        &format!("album_cover album_id={album_id} present={}", out.is_some()),
     );
     Ok(out)
 }

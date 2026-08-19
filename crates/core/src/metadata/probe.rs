@@ -64,7 +64,10 @@ pub fn probe_file(path: &Path) -> Result<Probe, ProbeError> {
             telemetry::log(
                 "WARN",
                 "metadata",
-                &format!("probe_file read_tagged_file failed path={} err={e}", path.display()),
+                &format!(
+                    "probe_file read_tagged_file failed path={} err={e}",
+                    path.display()
+                ),
             );
             if let Some(c) = codec_hint {
                 telemetry::log(

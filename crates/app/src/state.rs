@@ -23,6 +23,20 @@ use serde::Serialize;
 
 use crate::error::AppError;
 
+#[cfg(feature = "tauri")]
+use crate::command::EditableTrackFields;
+
+/// Tuple shape of `SELECT t.title, t.genre, a.year, t.track_no, t.disc_no FROM track ...`.
+/// Used by `get_editable_track` to avoid a wide anonymous struct.
+#[cfg(feature = "tauri")]
+type EditableTrackRow = (
+    Option<String>,
+    Option<String>,
+    Option<i32>,
+    Option<i32>,
+    Option<i32>,
+);
+
 /// Snapshot of the library status for the front-end.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct LibraryStatus {
@@ -74,16 +88,16 @@ impl AppState {
             &format!("implicit open target path={}", path.display()),
         );
         if let Err(e) = state.open_library(&path) {
-            telemetry::log(
-                "WARN",
-                "app",
-                &format!("implicit library open failed: {e}"),
-            );
+            telemetry::log("WARN", "app", &format!("implicit library open failed: {e}"));
         }
         telemetry::log(
             "INFO",
             "app",
-            &format!("AppState ready is_open={} path={:?}", state.is_open(), state.library_status().path),
+            &format!(
+                "AppState ready is_open={} path={:?}",
+                state.is_open(),
+                state.library_status().path
+            ),
         );
         state
     }
@@ -142,13 +156,10 @@ impl AppState {
 
     pub fn library(&self) -> Result<Library, AppError> {
         let inner = self.inner.lock().expect("state poisoned");
-        let lib = inner
-            .library
-            .clone()
-            .ok_or_else(|| {
-                telemetry::log("WARN", "app", "library() called without an open library");
-                AppError::Internal("library not opened yet".into())
-            })?;
+        let lib = inner.library.clone().ok_or_else(|| {
+            telemetry::log("WARN", "app", "library() called without an open library");
+            AppError::Internal("library not opened yet".into())
+        })?;
         drop(inner);
         Ok(lib)
     }
@@ -180,7 +191,10 @@ impl AppState {
                 telemetry::log(
                     "ERROR",
                     "app",
-                    &format!("add_folder: upsert_folder failed root={} err={e}", root.display()),
+                    &format!(
+                        "add_folder: upsert_folder failed root={} err={e}",
+                        root.display()
+                    ),
                 );
                 return Err(e.into());
             }
@@ -263,10 +277,7 @@ impl AppState {
     pub fn add_folders<I, P>(
         &self,
         paths: I,
-    ) -> Result<
-        Vec<(i64, mimir_core::scanner::ScanSummary)>,
-        AppError,
-    >
+    ) -> Result<Vec<(i64, mimir_core::scanner::ScanSummary)>, AppError>
     where
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
@@ -445,16 +456,9 @@ impl AppState {
             "app",
             &format!("get_editable_track track_id={track_id}"),
         );
-        use crate::command::EditableTrackFields;
         let lib = self.library()?;
         let conn = lib.conn()?;
-        let row: (
-            Option<String>,
-            Option<String>,
-            Option<i32>,
-            Option<i32>,
-            Option<i32>,
-        ) = conn
+        let row: EditableTrackRow = conn
             .query_row(
                 "SELECT t.title, t.genre, a.year, t.track_no, t.disc_no \
                  FROM track t LEFT JOIN album a ON a.id = t.album_id \
@@ -520,7 +524,11 @@ impl AppState {
         let lib = self.library()?;
         let conn = lib.conn()?;
         mimir_core::db::update_track(&conn, track_id, &patch)?;
-        telemetry::log("INFO", "app", &format!("update_track ok track_id={track_id}"));
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("update_track ok track_id={track_id}"),
+        );
         Ok(())
     }
 
@@ -530,11 +538,7 @@ impl AppState {
         &self,
         track_id: i64,
     ) -> Result<Option<mimir_core::db::LyricsRow>, AppError> {
-        telemetry::log(
-            "DEBUG",
-            "app",
-            &format!("track_lyrics track_id={track_id}"),
-        );
+        telemetry::log("DEBUG", "app", &format!("track_lyrics track_id={track_id}"));
         let lib = self.library()?;
         let conn = lib.conn()?;
         let out = mimir_core::db::track_lyrics(&conn, track_id)?;
@@ -544,7 +548,7 @@ impl AppState {
             &format!(
                 "track_lyrics ok track_id={track_id} present={} bytes={}",
                 out.is_some(),
-                out.as_ref().map(|r| r.text.len()).unwrap_or(0)
+                out.as_ref().map_or(0, |r| r.text.len())
             ),
         );
         Ok(out)
@@ -601,7 +605,10 @@ impl AppState {
         telemetry::log(
             "DEBUG",
             "app",
-            &format!("play_track path={} rg_track={track_db:?} rg_album={album_db:?}", path.display()),
+            &format!(
+                "play_track path={} rg_track={track_db:?} rg_album={album_db:?}",
+                path.display()
+            ),
         );
 
         #[cfg(feature = "output")]
@@ -626,14 +633,17 @@ impl AppState {
                     );
                     AppError::from(e)
                 })?;
-            player.handle().send(PlayerCommand::Play(path.clone())).map_err(|e| {
-                telemetry::log(
-                    "ERROR",
-                    "app",
-                    &format!("play_track: Play send err path={}: {e}", path.display()),
-                );
-                AppError::from(e)
-            })?;
+            player
+                .handle()
+                .send(PlayerCommand::Play(path.clone()))
+                .map_err(|e| {
+                    telemetry::log(
+                        "ERROR",
+                        "app",
+                        &format!("play_track: Play send err path={}: {e}", path.display()),
+                    );
+                    AppError::from(e)
+                })?;
         }
 
         // When the `output` feature is off, the transport state is the only

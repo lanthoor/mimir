@@ -16,10 +16,10 @@
 //! `tracing-appender` later.
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 #[path = "rotation_tests.rs"]
 mod rotation;
+#[cfg(test)]
+mod tests;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -49,9 +49,7 @@ fn default_log_dir() -> Option<PathBuf> {
     // Prefer $XDG_STATE_HOME; fall back to ~/.local/var.
     let base = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local"))
-        });
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local")));
     let dir = base?.join("var").join("log");
     fs::create_dir_all(&dir).ok()?;
     Some(dir)

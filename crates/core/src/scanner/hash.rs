@@ -42,7 +42,11 @@ pub fn hash_file(path: &Path) -> Result<FileHash, HashError> {
     telemetry::log(
         "DEBUG",
         "scanner",
-        &format!("hash_file read {} bytes from {}", bytes.len(), path.display()),
+        &format!(
+            "hash_file read {} bytes from {}",
+            bytes.len(),
+            path.display()
+        ),
     );
     let path_hash: [u8; 32] = blake3::hash(&bytes).into();
 

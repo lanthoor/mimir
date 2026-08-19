@@ -47,7 +47,10 @@ pub fn library_add_folder(
     path: String,
 ) -> Result<AddFolderResult, AppError> {
     let (id, summary) = state.add_folder(Path::new(&path))?;
-    Ok(AddFolderResult { folder_id: id, summary })
+    Ok(AddFolderResult {
+        folder_id: id,
+        summary,
+    })
 }
 
 /// Add multiple folders in one call. Returns one `AddFolderResult` per path
@@ -148,7 +151,7 @@ pub fn library_query_tracks(
 }
 
 /// Paged list of tracks. Used for the Tracks view's default render so the
-/// UI never asks FTS to match an empty query (which is a SQLite syntax error).
+/// UI never asks `FTS` to match an empty query (which is a `SQLite` syntax error).
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn library_list_tracks(
@@ -187,8 +190,8 @@ pub struct TrackPatchInput {
     pub year: Option<i32>,
     pub track_no: Option<i32>,
     pub disc_no: Option<i32>,
-    /// Field names to clear (set to NULL). Valid: "title","genre","year",
-    /// "track_no","disc_no". Use this when you want to unset a column
+    /// Field names to clear (set to NULL). Valid: `"title"`,`"genre"`,`"year"`,
+    /// `"track_no"`,`"disc_no"`. Use this when you want to unset a column
     /// rather than replace it.
     pub clear: Vec<String>,
 }

@@ -70,10 +70,7 @@ pub fn track_lyrics(
     mimir_telemetry::log(
         "INFO",
         "lyrics",
-        &format!(
-            "track_lyrics track_id={track_id} present={}",
-            out.is_some()
-        ),
+        &format!("track_lyrics track_id={track_id} present={}", out.is_some()),
     );
     Ok(out)
 }

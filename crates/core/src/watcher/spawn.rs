@@ -35,11 +35,7 @@ pub fn spawn_watcher(root: &Path, tx: Sender<IngestEvent>) -> Result<WatcherHand
             match res {
                 Ok(events) => {
                     let n = events.len();
-                    telemetry::log(
-                        "DEBUG",
-                        "watcher",
-                        &format!("recv debounce batch n={n}"),
-                    );
+                    telemetry::log("DEBUG", "watcher", &format!("recv debounce batch n={n}"));
                     for debounced in events {
                         // A single DebouncedEvent may carry a paired rename
                         // (From + To). notify-debouncer-full collapses them into

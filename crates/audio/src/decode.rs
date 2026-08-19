@@ -45,6 +45,7 @@ const fn unsupported(err: &SymError) -> bool {
 ///
 /// Decodes the *first* audio track in the container to completion. For Tier
 /// 0's single-track-per-file assumption this is sufficient.
+#[allow(clippy::too_many_lines)]
 pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
     telemetry::log(
         "INFO",
@@ -129,10 +130,7 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
                 telemetry::log(
                     "DEBUG",
                     "audio.decode",
-                    &format!(
-                        "EOF reached packets={packets} samples={}",
-                        samples.len()
-                    ),
+                    &format!("EOF reached packets={packets} samples={}", samples.len()),
                 );
                 break;
             }
@@ -158,7 +156,10 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
                 telemetry::log(
                     "WARN",
                     "audio.decode",
-                    &format!("recoverable decoder err n={decoder_errors} samples={}", samples.len()),
+                    &format!(
+                        "recoverable decoder err n={decoder_errors} samples={}",
+                        samples.len()
+                    ),
                 );
             }
             Err(e) => return Err(DecodeError::Decode(e.to_string())),

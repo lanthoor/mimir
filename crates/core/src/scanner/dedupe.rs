@@ -55,7 +55,7 @@ pub struct ScanSummary {
 /// `ScanError::NotFound` / `NotADirectory` are returned up-front so the
 /// front-end can show a clear diagnostic; an empty reachable directory
 /// still succeeds with a zero-count `ScanSummary`.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 pub fn scan_root(
     conn: &Connection,
     root: &Path,
@@ -148,12 +148,15 @@ pub fn scan_root(
             telemetry::log(
                 "ERROR",
                 "scanner",
-                &format!("ScanJob send failed (channel closed) path={}", path.display()),
+                &format!(
+                    "ScanJob send failed (channel closed) path={}",
+                    path.display()
+                ),
             );
         }
     }
 
-telemetry::log(
+    telemetry::log(
         "INFO",
         "scanner",
         &format!(

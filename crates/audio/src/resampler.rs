@@ -81,18 +81,18 @@ pub fn resample_interleaved(
         // Build per-channel input slices each iteration. `owned_tails` keeps
         // the zero-padded Vecs alive across `process_into_buffer`.
         let mut owned_blocks: Vec<Vec<f32>> = Vec::with_capacity(channels_us);
-        for ch in 0..channels_us {
-            let mut block: Vec<f32> = planar_in[ch][frame_cursor..frame_cursor + take].to_vec();
+        for chunk in &planar_in[..channels_us] {
+            let mut block: Vec<f32> = chunk[frame_cursor..frame_cursor + take].to_vec();
             block.resize(chunk_in, 0.0);
             owned_blocks.push(block);
         }
-        let input_slices: Vec<&[f32]> =
-            owned_blocks.iter().map(|b| b.as_slice()).collect();
+        let input_slices: Vec<&[f32]> = owned_blocks.iter().map(Vec::as_slice).collect();
         let in_refs: &[&[f32]] = &input_slices;
 
         let frames_out = sinc.output_frames_next();
-        let mut output_blocks: Vec<Vec<f32>> =
-            (0..channels_us).map(|_| vec![0.0_f32; frames_out]).collect();
+        let mut output_blocks: Vec<Vec<f32>> = (0..channels_us)
+            .map(|_| vec![0.0_f32; frames_out])
+            .collect();
 
         // `process_into_buffer` wants `&mut [Vout]` where `Vout: AsMut<[T]>`.
         let mut out_refs: Vec<&mut Vec<f32>> = output_blocks.iter_mut().collect();

@@ -67,7 +67,10 @@ pub fn extract_tags(path: &Path) -> Result<Tags, ExtractError> {
             mimir_telemetry::log(
                 "DEBUG",
                 "metadata",
-                &format!("extract_tags lofty-err fallback default path={} err={e}", path.display()),
+                &format!(
+                    "extract_tags lofty-err fallback default path={} err={e}",
+                    path.display()
+                ),
             );
             Tags::default()
         }

@@ -71,7 +71,9 @@ pub fn upsert_album(
     mimir_telemetry::log(
         "INFO",
         "metadata",
-        &format!("upsert_album inserted id={id} title={title} artist={album_artist_id} year={year:?}"),
+        &format!(
+            "upsert_album inserted id={id} title={title} artist={album_artist_id} year={year:?}"
+        ),
     );
     Ok(id)
 }

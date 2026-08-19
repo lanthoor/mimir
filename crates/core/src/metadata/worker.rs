@@ -30,6 +30,7 @@ pub enum IngestError {
 /// Returns the new track id. Idempotent on `(path_hash, mtime_ns,
 /// size_bytes)`: a second call with the same triple updates in place rather
 /// than inserting a duplicate.
+#[allow(clippy::too_many_lines)]
 pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
     let ScanJob {
         folder_id,
@@ -40,10 +41,7 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
     telemetry::log(
         "INFO",
         "ingest",
-        &format!(
-            "ingest start folder_id={folder_id} path={}",
-            path.display()
-        ),
+        &format!("ingest start folder_id={folder_id} path={}", path.display()),
     );
 
     let probe = match probe_or_default(&path) {
@@ -69,7 +67,10 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
             telemetry::log(
                 "WARN",
                 "ingest",
-                &format!("extract_tags err using default path={} err={e}", path.display()),
+                &format!(
+                    "extract_tags err using default path={} err={e}",
+                    path.display()
+                ),
             );
             Tags::default()
         }
@@ -77,29 +78,26 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
     apply_heuristic(&path, &mut tags);
 
     let artist_name = tags.artist.as_deref().or(tags.album_artist.as_deref());
-    let artist_id = match artist_name {
-        Some(name) => {
-            let id = upsert_artist(conn, name)?;
-            telemetry::log(
-                "DEBUG",
-                "ingest",
-                &format!("artist upserted id={id} name={name}"),
-            );
-            id
-        }
-        None => {
-            let id: i64 = conn.query_row(
-                "SELECT id FROM artist WHERE name = 'Unknown Artist'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )?;
-            telemetry::log(
-                "DEBUG",
-                "ingest",
-                &format!("artist fallback Unknown Artist id={id}"),
-            );
-            id
-        }
+    let artist_id = if let Some(name) = artist_name {
+        let id = upsert_artist(conn, name)?;
+        telemetry::log(
+            "DEBUG",
+            "ingest",
+            &format!("artist upserted id={id} name={name}"),
+        );
+        id
+    } else {
+        let id: i64 = conn.query_row(
+            "SELECT id FROM artist WHERE name = 'Unknown Artist'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        telemetry::log(
+            "DEBUG",
+            "ingest",
+            &format!("artist fallback Unknown Artist id={id}"),
+        );
+        id
     };
 
     let album_id = if let Some(album_title) = tags.album.as_deref() {
@@ -107,7 +105,10 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
         telemetry::log(
             "DEBUG",
             "ingest",
-            &format!("album upserted id={id} title={album_title} year={:?}", tags.year),
+            &format!(
+                "album upserted id={id} title={album_title} year={:?}",
+                tags.year
+            ),
         );
         Some(id)
     } else {
@@ -120,7 +121,10 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
             Ok(_) => telemetry::log(
                 "DEBUG",
                 "ingest",
-                &format!("cover attached album_id={album_id} mime={}", cover.mime_type),
+                &format!(
+                    "cover attached album_id={album_id} mime={}",
+                    cover.mime_type
+                ),
             ),
             Err(e) => telemetry::log(
                 "WARN",
@@ -196,7 +200,7 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
 
     if let Some(lyrics) = tags.lyrics.as_deref() {
         match upsert_lyrics(conn, track_id, lyrics, "und", "embedded") {
-            Ok(_) => telemetry::log(
+            Ok(()) => telemetry::log(
                 "DEBUG",
                 "ingest",
                 &format!("lyrics attached track_id={track_id} bytes={}", lyrics.len()),
@@ -281,7 +285,11 @@ pub fn run_worker(conn: &Connection, rx: std::sync::mpsc::Receiver<ScanJob>) {
         telemetry::log(
             "DEBUG",
             "worker",
-            &format!("recv job n={processed} folder_id={} path={}", job.folder_id, job.path.display()),
+            &format!(
+                "recv job n={processed} folder_id={} path={}",
+                job.folder_id,
+                job.path.display()
+            ),
         );
         if let Err(e) = ingest(conn, job) {
             telemetry::log("ERROR", "ingest", &format!("{e}"));

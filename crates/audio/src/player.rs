@@ -134,6 +134,7 @@ impl BufferState {
 
     /// Fill `out` with up to `out.len()` samples. Returns the number of
     /// samples produced. Returns 0 when the buffer is exhausted.
+    #[cfg(feature = "output")]
     pub fn fill(&mut self, out: &mut [f32]) -> usize {
         let remaining = self.samples.len().saturating_sub(self.position);
         let n = remaining.min(out.len());
@@ -187,7 +188,7 @@ impl OutputStream for NoopOutputStream {
 /// Worker thread: drain commands and update the snapshot. The cpal output
 /// stream is opened whenever a `Play` command succeeds and torn down on
 /// `Stop` (or replaced on the next `Play`).
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) {
     telemetry::log("INFO", "audio.player", "worker_loop starting");
     let mut output: Option<Box<dyn OutputStream>> = None;
@@ -215,11 +216,7 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
         match cmd {
             PlayerCommand::SetReplayGainDb(g) => {
                 *gain_db.lock().expect("gain poisoned") = g;
-                telemetry::log(
-                    "INFO",
-                    "audio.player",
-                    &format!("gain set to {g:?}"),
-                );
+                telemetry::log("INFO", "audio.player", &format!("gain set to {g:?}"));
             }
             PlayerCommand::PrepareNext(path) => {
                 let gain = *gain_db.lock().expect("gain poisoned");
@@ -250,10 +247,7 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                 telemetry::log(
                     "INFO",
                     "audio.player",
-                    &format!(
-                        "Play start path={} gain_db={gain:?}",
-                        path.display()
-                    ),
+                    &format!("Play start path={} gain_db={gain:?}", path.display()),
                 );
                 match decode_to_buffer_with_gain(&path, &buffer, gain) {
                     Ok(()) => {
@@ -288,10 +282,7 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                         telemetry::log(
                             "ERROR",
                             "audio.player",
-                            &format!(
-                                "Play decode failed path={} err={e}",
-                                path.display()
-                            ),
+                            &format!("Play decode failed path={} err={e}", path.display()),
                         );
                         let mut snapshot = shared.lock().expect("player poisoned");
                         snapshot.current = Some(path);
@@ -335,11 +326,7 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
             }
             // Queue/Next/Previous are wired in a later commit.
             PlayerCommand::Enqueue(_) | PlayerCommand::Next | PlayerCommand::Previous => {
-                telemetry::log(
-                    "DEBUG",
-                    "audio.player",
-                    "queue/next/prev: deferred (no-op)",
-                );
+                telemetry::log("DEBUG", "audio.player", "queue/next/prev: deferred (no-op)");
             }
         }
     }
@@ -365,7 +352,10 @@ pub(crate) fn decode_to_buffer_with_gain(
     telemetry::log(
         "DEBUG",
         "audio.player",
-        &format!("decode_to_buffer start path={} gain={gain_db:?}", path.display()),
+        &format!(
+            "decode_to_buffer start path={} gain={gain_db:?}",
+            path.display()
+        ),
     );
     let mut audio =
         super::decode::decode_file(path).map_err(|e| PlayerError::Decode(e.to_string()))?;
@@ -431,12 +421,8 @@ pub(crate) fn maybe_resample_buffer(buffer: &SharedBuffer, device_rate: u32) {
         ),
     );
     let before_n = state.samples.len();
-    let resampled = super::resampler::resample_interleaved(
-        &state.samples,
-        channels,
-        src_rate,
-        device_rate,
-    );
+    let resampled =
+        super::resampler::resample_interleaved(&state.samples, channels, src_rate, device_rate);
     let after_n = resampled.len();
     state.samples = resampled;
     state.position = 0;
@@ -452,9 +438,7 @@ pub(crate) fn maybe_resample_buffer(buffer: &SharedBuffer, device_rate: u32) {
 /// the caller can resample freshly-decoded buffers to the device rate.
 #[cfg(feature = "output")]
 #[allow(clippy::cast_possible_truncation)]
-fn open_output_stream(
-    buffer: &SharedBuffer,
-) -> Result<(Box<dyn OutputStream>, u32), PlayerError> {
+fn open_output_stream(buffer: &SharedBuffer) -> Result<(Box<dyn OutputStream>, u32), PlayerError> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     let host = cpal::default_host();
@@ -527,8 +511,7 @@ fn open_output_stream(
 }
 
 #[cfg(not(feature = "output"))]
-fn open_output_stream(
-    _buffer: &SharedBuffer,
-) -> Result<(Box<dyn OutputStream>, u32), PlayerError> {
+#[allow(clippy::unnecessary_wraps)]
+fn open_output_stream(_buffer: &SharedBuffer) -> Result<(Box<dyn OutputStream>, u32), PlayerError> {
     Ok((Box::new(NoopOutputStream), 48_000))
 }

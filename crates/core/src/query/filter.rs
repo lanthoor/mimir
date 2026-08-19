@@ -29,9 +29,7 @@ pub fn list_tracks_filtered(
     mimir_telemetry::log(
         "INFO",
         "query",
-        &format!(
-            "list_tracks_filtered filter={filter:?} limit={limit} offset={offset}"
-        ),
+        &format!("list_tracks_filtered filter={filter:?} limit={limit} offset={offset}"),
     );
     let mut sql = String::from(
         "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \

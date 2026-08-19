@@ -70,11 +70,7 @@ impl Library {
         Self::configure(&conn)?;
         telemetry::log("DEBUG", "db", "init: ensure_and_apply");
         let applied = migrations::ensure_and_apply(&conn)?;
-        telemetry::log(
-            "INFO",
-            "db",
-            &format!("init: schema_version now {applied}"),
-        );
+        telemetry::log("INFO", "db", &format!("init: schema_version now {applied}"));
         Ok(())
     }
 

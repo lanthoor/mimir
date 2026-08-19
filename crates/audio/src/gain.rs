@@ -24,14 +24,19 @@ pub fn apply_gain_db_inplace(samples: &mut [f32], db: f64) {
     mimir_telemetry::log(
         "DEBUG",
         "audio.gain",
-        &format!("apply_gain_db_inplace n={} db={db} linear={g}", samples.len()),
+        &format!(
+            "apply_gain_db_inplace n={} db={db} linear={g}",
+            samples.len()
+        ),
     );
     let mut clipped_high = 0u64;
     let mut clipped_low = 0u64;
     for s in samples.iter_mut() {
         let v = *s * g;
         let c = v.clamp(-1.0, 1.0);
-        if c != v {
+        // ponytail: clip detection uses a finite epsilon instead of `!=` to
+        // dodge clippy::float_cmp and the float-comparison footgun.
+        if (c - v).abs() > f32::EPSILON {
             if v > 0.0 {
                 clipped_high += 1;
             } else {
