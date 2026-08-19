@@ -1,5 +1,6 @@
 //! Tests for metadata extraction.
 
+use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
 use std::fs;
 
 use crate::db::{album_cover, Library};
@@ -260,6 +261,50 @@ fn select_cover_uses_octet_stream_when_mime_unknown() {
     let chosen = select_cover(&picks).expect("a pick");
     assert_eq!(chosen.mime_type, "application/octet-stream");
     assert_eq!(chosen.data, b"raw-bytes");
+}
+
+fn empty_tag() -> Tag {
+    Tag::new(TagType::VorbisComments)
+}
+
+fn push_unknown(tag: &mut Tag, name: &str, value: &str) {
+    tag.insert_unchecked(TagItem::new(
+        ItemKey::Unknown(name.to_string()),
+        ItemValue::Text(value.to_string()),
+    ));
+}
+
+#[test]
+fn extract_replaygain_vorbis_style() {
+    let mut tag = empty_tag();
+    push_unknown(&mut tag, "REPLAYGAIN_TRACK_GAIN", "-6.84 dB");
+    push_unknown(&mut tag, "REPLAYGAIN_ALBUM_GAIN", "-9.20 dB");
+
+    let track_db =
+        crate::metadata::parse_replaygain(&tag, "REPLAYGAIN_TRACK_GAIN", "replaygain_track_gain");
+    let album_db =
+        crate::metadata::parse_replaygain(&tag, "REPLAYGAIN_ALBUM_GAIN", "replaygain_album_gain");
+
+    assert_eq!(track_db, Some(-6.84));
+    assert_eq!(album_db, Some(-9.20));
+}
+
+#[test]
+fn extract_replaygain_id3v2_txxx_style() {
+    let mut tag = empty_tag();
+    push_unknown(&mut tag, "replaygain_track_gain", "+1.23 dB");
+
+    let v =
+        crate::metadata::parse_replaygain(&tag, "REPLAYGAIN_TRACK_GAIN", "replaygain_track_gain");
+    assert_eq!(v, Some(1.23));
+}
+
+#[test]
+fn extract_replaygain_missing_is_none() {
+    let tag = empty_tag();
+    let v =
+        crate::metadata::parse_replaygain(&tag, "REPLAYGAIN_TRACK_GAIN", "replaygain_track_gain");
+    assert!(v.is_none());
 }
 
 #[test]

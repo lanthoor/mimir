@@ -325,18 +325,21 @@ impl AppState {
         // Update the transport state first so the UI sees Playing immediately.
         self.send_transport(transport_cmd.clone());
 
-        // Look up the file path.
+        // Look up the file path + ReplayGain gain.
         let lib = self.library()?;
         let conn = lib.conn()?;
-        let path: Option<PathBuf> = conn
-            .query_row("SELECT path FROM track WHERE id = ?1", [track_id], |row| {
-                row.get::<_, String>(0)
-            })
-            .ok()
-            .map(PathBuf::from);
-        let Some(path) = path else {
+        let row: Option<(String, Option<f64>, Option<f64>)> = conn
+            .query_row(
+                "SELECT path, replaygain_track_db, replaygain_album_db \
+                 FROM track WHERE id = ?1",
+                [track_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .ok();
+        let Some((path_str, track_db, album_db)) = row else {
             return Err(AppError::Internal(format!("no track with id {track_id}")));
         };
+        let path = PathBuf::from(path_str);
 
         #[cfg(feature = "output")]
         {
@@ -346,6 +349,12 @@ impl AppState {
                 inner.player = Some(mimir_audio::Player::new());
             }
             let player = inner.player.as_ref().expect("just initialized");
+            // Prefer album gain over track gain; pass None when neither exists.
+            let gain = album_db.or(track_db);
+            player
+                .handle()
+                .send(PlayerCommand::SetReplayGainDb(gain))
+                .map_err(AppError::from)?;
             player
                 .handle()
                 .send(PlayerCommand::Play(path))
@@ -357,6 +366,8 @@ impl AppState {
         #[cfg(not(feature = "output"))]
         {
             let _ = path;
+            let _ = track_db;
+            let _ = album_db;
         }
 
         Ok(())

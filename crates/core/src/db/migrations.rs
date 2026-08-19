@@ -51,6 +51,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 9,
         sql: include_str!("../../migrations/0009_lyrics.sql"),
     },
+    Migration {
+        version: 10,
+        sql: include_str!("../../migrations/0010_replaygain.sql"),
+    },
 ];
 
 const SCHEMA_VERSION_DDL: &str = "CREATE TABLE IF NOT EXISTS schema_version (\
