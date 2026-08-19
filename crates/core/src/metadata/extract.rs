@@ -38,14 +38,55 @@ pub enum ExtractError {
 /// the file has no tag block or can't be fully parsed; only fails on I/O
 /// errors or unknown extensions.
 pub fn extract_tags(path: &Path) -> Result<Tags, ExtractError> {
-    match read_tagged_file(path) {
-        Ok(tagged) => Ok(extract_from_tagged(&tagged)),
-        Err(super::probe::ProbeError::Lofty(_)) => Ok(Tags::default()),
-        Err(super::probe::ProbeError::Io(io)) => Err(ExtractError::Io(io)),
-        Err(super::probe::ProbeError::UnknownExtension(_)) => {
-            Err(ExtractError::Lofty("unknown extension".into()))
+    mimir_telemetry::log(
+        "DEBUG",
+        "metadata",
+        &format!("extract_tags start path={}", path.display()),
+    );
+    let tags = match read_tagged_file(path) {
+        Ok(tagged) => {
+            let t = extract_from_tagged(&tagged);
+            mimir_telemetry::log(
+                "DEBUG",
+                "metadata",
+                &format!(
+                    "extract_tags ok path={} title={:?} artist={:?} album={:?} genre={:?} year={:?} rg_track={:?} rg_album={:?}",
+                    path.display(),
+                    t.title,
+                    t.artist,
+                    t.album,
+                    t.genre,
+                    t.year,
+                    t.replaygain_track_db,
+                    t.replaygain_album_db
+                ),
+            );
+            t
         }
-    }
+        Err(super::probe::ProbeError::Lofty(e)) => {
+            mimir_telemetry::log(
+                "DEBUG",
+                "metadata",
+                &format!(
+                    "extract_tags lofty-err fallback default path={} err={e}",
+                    path.display()
+                ),
+            );
+            Tags::default()
+        }
+        Err(super::probe::ProbeError::Io(io)) => {
+            mimir_telemetry::log(
+                "ERROR",
+                "metadata",
+                &format!("extract_tags io err path={} err={io}", path.display()),
+            );
+            return Err(ExtractError::Io(io));
+        }
+        Err(super::probe::ProbeError::UnknownExtension(_)) => {
+            return Err(ExtractError::Lofty("unknown extension".into()));
+        }
+    };
+    Ok(tags)
 }
 
 fn extract_from_tagged(tagged: &lofty::file::TaggedFile) -> Tags {

@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/audio",
     "crates/app",
+    "crates/telemetry",
 ]
 
 [workspace.package]
@@ -23,6 +24,8 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+needless_pass_by_value = "allow"
+unnecessary_wraps = "allow"
 
 [profile.release]
 lto = "thin"

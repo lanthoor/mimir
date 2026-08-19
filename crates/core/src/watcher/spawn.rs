@@ -8,6 +8,8 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use notify::{RecursiveMode, Watcher};
+
+use mimir_telemetry as telemetry;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 
 use super::event::IngestEvent;
@@ -21,12 +23,19 @@ pub struct WatcherHandle {
 ///
 /// The returned `WatcherHandle` keeps the watcher alive; drop it to stop.
 pub fn spawn_watcher(root: &Path, tx: Sender<IngestEvent>) -> Result<WatcherHandle, notify::Error> {
+    telemetry::log(
+        "INFO",
+        "watcher",
+        &format!("spawn_watcher start root={}", root.display()),
+    );
     let mut debouncer = new_debouncer(
         Duration::from_millis(500),
         None,
         move |res: DebounceEventResult| {
             match res {
                 Ok(events) => {
+                    let n = events.len();
+                    telemetry::log("DEBUG", "watcher", &format!("recv debounce batch n={n}"));
                     for debounced in events {
                         // A single DebouncedEvent may carry a paired rename
                         // (From + To). notify-debouncer-full collapses them into
@@ -37,6 +46,11 @@ pub fn spawn_watcher(root: &Path, tx: Sender<IngestEvent>) -> Result<WatcherHand
                         // re-scan by path when that matters.
                         for raw in &debounced.event.paths {
                             if !is_audio_path_str(raw) {
+                                telemetry::log(
+                                    "DEBUG",
+                                    "watcher",
+                                    &format!("skip non-audio path={}", raw.display()),
+                                );
                                 continue;
                             }
                             let kind = match &debounced.event.kind {
@@ -49,18 +63,36 @@ pub fn spawn_watcher(root: &Path, tx: Sender<IngestEvent>) -> Result<WatcherHand
                                 notify::event::EventKind::Remove(_) => {
                                     super::event::EventKind::Removed
                                 }
-                                _ => continue,
+                                other => {
+                                    telemetry::log(
+                                        "DEBUG",
+                                        "watcher",
+                                        &format!("unhandled kind {other:?} path={}", raw.display()),
+                                    );
+                                    continue;
+                                }
                             };
-                            let _ = tx.send(IngestEvent {
+                            match tx.send(IngestEvent {
                                 path: raw.clone(),
-                                kind,
-                            });
+                                kind: kind.clone(),
+                            }) {
+                                Ok(()) => telemetry::log(
+                                    "INFO",
+                                    "watcher",
+                                    &format!("emitted {kind:?} path={}", raw.display()),
+                                ),
+                                Err(e) => telemetry::log(
+                                    "ERROR",
+                                    "watcher",
+                                    &format!("tx.send failed path={} err={e}", raw.display()),
+                                ),
+                            }
                         }
                     }
                 }
                 Err(errors) => {
                     for e in errors {
-                        eprintln!("watcher error: {e:?}");
+                        telemetry::log("ERROR", "watcher", &format!("{e:?}"));
                     }
                 }
             }
@@ -68,6 +100,15 @@ pub fn spawn_watcher(root: &Path, tx: Sender<IngestEvent>) -> Result<WatcherHand
     )?;
 
     debouncer.watcher().watch(root, RecursiveMode::Recursive)?;
+    telemetry::log(
+        "INFO",
+        "watcher",
+        &format!(
+            "watcher armed root={} backend={} debounce=500ms",
+            root.display(),
+            std::any::type_name::<notify::RecommendedWatcher>()
+        ),
+    );
 
     Ok(WatcherHandle {
         _debouncer: debouncer,

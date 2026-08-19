@@ -21,6 +21,11 @@ pub fn search_tracks(
     limit: i64,
 ) -> Result<Vec<TrackRow>, rusqlite::Error> {
     let query = rewrite_as_prefix(query);
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("search_tracks query={query:?} limit={limit}"),
+    );
     let mut stmt = conn.prepare(
         "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
                 t.genre, a.year, \
@@ -60,11 +65,24 @@ pub fn search_tracks(
         let fallback: Vec<TrackRow> = stmt
             .query_map(rusqlite::params![&pat, limit], row_to_track)?
             .collect::<Result<Vec<_>, _>>()?;
+        mimir_telemetry::log(
+            "INFO",
+            "query",
+            &format!(
+                "search_tracks fts-empty, LIKE fallback returned n={}",
+                fallback.len()
+            ),
+        );
         fallback
     } else {
         rows
     };
 
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("search_tracks returned n={}", rows.len()),
+    );
     Ok(rows)
 }
 

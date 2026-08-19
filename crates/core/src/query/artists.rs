@@ -14,6 +14,7 @@ pub struct ArtistRow {
 /// Return every artist, sorted by `sort_name` (case-insensitive), with
 /// `NULL`s last.
 pub fn list_artists(conn: &Connection) -> Result<Vec<ArtistRow>, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "list_artists");
     let mut stmt = conn.prepare(
         "SELECT id, name, sort_name FROM artist \
          ORDER BY sort_name COLLATE NOCASE ASC, name COLLATE NOCASE ASC",
@@ -27,5 +28,10 @@ pub fn list_artists(conn: &Connection) -> Result<Vec<ArtistRow>, rusqlite::Error
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_artists returned n={}", rows.len()),
+    );
     Ok(rows)
 }

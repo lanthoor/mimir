@@ -26,6 +26,11 @@ pub fn list_tracks_filtered(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<TrackRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_tracks_filtered filter={filter:?} limit={limit} offset={offset}"),
+    );
     let mut sql = String::from(
         "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
                 t.genre, a.year, \
@@ -60,5 +65,10 @@ pub fn list_tracks_filtered(
     let binds_ref: Vec<&dyn ToSql> = binds.iter().map(std::convert::AsRef::as_ref).collect();
     let rows = stmt.query_map(params_from_iter(binds_ref), row_to_track)?;
     let out: Vec<TrackRow> = rows.collect::<Result<_, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_tracks_filtered returned n={}", out.len()),
+    );
     Ok(out)
 }

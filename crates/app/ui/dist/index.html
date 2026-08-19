@@ -13,6 +13,8 @@
         <button data-view="tracks" class="active">Tracks</button>
         <button data-view="albums">Albums</button>
         <button data-view="artists">Artists</button>
+        <button data-view="genres">Genres</button>
+        <button data-view="years">Years</button>
       </nav>
       <input id="search" type="search" placeholder="search…" />
       <button id="add-folder">+ folder</button>
@@ -20,12 +22,16 @@
 
     <main>
       <div id="status" class="status" hidden></div>
+      <div id="filter-bar" class="filter-bar" hidden></div>
       <section id="list" class="list"></section>
     </main>
 
     <footer class="now-playing">
-      <span id="np-title">—</span>
-      <span id="np-artist"></span>
+      <div class="now-playing-meta">
+        <span id="np-title">—</span>
+        <span id="np-artist"></span>
+      </div>
+      <button id="lyrics-toggle" title="show lyrics" hidden>Lyrics</button>
       <div class="controls">
         <button id="prev" title="previous">⏮</button>
         <button id="play" title="play">▶</button>
@@ -35,15 +41,44 @@
       </div>
     </footer>
 
+    <dialog id="lyrics-dialog">
+      <form method="dialog">
+        <h2>Lyrics</h2>
+        <pre id="lyrics-content"></pre>
+        <menu>
+          <button value="cancel">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="add-folder-dialog">
       <form method="dialog">
         <label>
           Folder path
-          <input id="add-folder-path" type="text" placeholder="/abs/path/to/music" />
+          <div class="folder-input-row">
+            <input id="add-folder-path" type="text" placeholder="/abs/path/to/music" />
+            <button id="add-folder-browse" type="button">Browse…</button>
+          </div>
         </label>
+        <div id="add-folder-info" class="add-folder-info"></div>
         <menu>
           <button value="cancel">Cancel</button>
           <button id="add-folder-confirm" value="default">Add</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="edit-track-dialog">
+      <form method="dialog" id="edit-track-form">
+        <h2>Edit track</h2>
+        <label>Title <input name="title" type="text" /></label>
+        <label>Genre <input name="genre" type="text" /></label>
+        <label>Year <input name="year" type="number" /></label>
+        <label>Track # <input name="track_no" type="number" min="1" /></label>
+        <label>Disc # <input name="disc_no" type="number" min="1" /></label>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="edit-track-save" value="save">Save</button>
         </menu>
       </form>
     </dialog>

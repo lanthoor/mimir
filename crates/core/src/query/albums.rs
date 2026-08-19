@@ -20,6 +20,11 @@ pub fn list_albums(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<AlbumRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("list_albums limit={limit} offset={offset}"),
+    );
     let mut stmt = conn.prepare(
         "SELECT a.id, a.title, a.year, ar.id, ar.name, \
                 (SELECT COUNT(*) FROM track t WHERE t.album_id = a.id) \
@@ -32,6 +37,11 @@ pub fn list_albums(
     let rows = stmt
         .query_map(rusqlite::params![limit, offset], row_to_album)?
         .collect::<Result<Vec<_>, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_albums returned n={}", rows.len()),
+    );
     Ok(rows)
 }
 

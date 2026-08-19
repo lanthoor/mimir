@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use blake3::Hasher;
+use mimir_telemetry as telemetry;
 use rusqlite::{Connection, OptionalExtension};
 
 /// Persist a folder row keyed by a blake3 hash of its canonical path.
@@ -20,6 +21,11 @@ pub fn upsert_folder(conn: &Connection, path: impl AsRef<Path>) -> rusqlite::Res
         )
         .optional()?
     {
+        telemetry::log(
+            "DEBUG",
+            "scanner",
+            &format!("upsert_folder hit id={id} path={path_str}"),
+        );
         return Ok(id);
     }
 
@@ -28,13 +34,17 @@ pub fn upsert_folder(conn: &Connection, path: impl AsRef<Path>) -> rusqlite::Res
         "INSERT OR IGNORE INTO folder (path, path_hash, active) VALUES (?1, ?2, 1)",
         rusqlite::params![&path_str, &path_hash],
     )?;
-    let _ = inserted; // either 0 or 1; either way we look up below.
-
-    conn.query_row(
+    let id = conn.query_row(
         "SELECT id FROM folder WHERE path = ?1",
         [&path_str],
         |row| row.get::<_, i64>(0),
-    )
+    )?;
+    telemetry::log(
+        "INFO",
+        "scanner",
+        &format!("upsert_folder inserted id={id} path={path_str} inserted={inserted}"),
+    );
+    Ok(id)
 }
 
 /// blake3 hash of a folder path (used as a secondary lookup key).

@@ -37,6 +37,11 @@ pub fn update_track(
     track_id: i64,
     patch: &TrackPatch,
 ) -> Result<i64, UpdateError> {
+    mimir_telemetry::log(
+        "INFO",
+        "edit",
+        &format!("update_track start track_id={track_id} patch={patch:?}"),
+    );
     let exists: bool = conn
         .query_row("SELECT 1 FROM track WHERE id = ?1", [track_id], |row| {
             row.get::<_, i64>(0)
@@ -47,6 +52,11 @@ pub fn update_track(
             other => Err(other),
         })?;
     if !exists {
+        mimir_telemetry::log(
+            "WARN",
+            "edit",
+            &format!("update_track track_id={track_id} not found"),
+        );
         return Err(UpdateError::NotFound(track_id));
     }
 
@@ -73,12 +83,25 @@ pub fn update_track(
         args.push(Box::new(d));
     }
     if sets.is_empty() {
+        mimir_telemetry::log(
+            "INFO",
+            "edit",
+            &format!("update_track no-op (empty patch) track_id={track_id}"),
+        );
         return Ok(track_id);
     }
 
     let sql = format!("UPDATE track SET {} WHERE id = ?", sets.join(", "));
     args.push(Box::new(track_id));
     let binds: Vec<&dyn rusqlite::ToSql> = args.iter().map(std::convert::AsRef::as_ref).collect();
-    conn.execute(&sql, params_from_iter(binds))?;
+    let n = conn.execute(&sql, params_from_iter(binds))?;
+    mimir_telemetry::log(
+        "INFO",
+        "edit",
+        &format!(
+            "update_track ok track_id={track_id} sets={} rows={n}",
+            sets.len()
+        ),
+    );
     Ok(track_id)
 }

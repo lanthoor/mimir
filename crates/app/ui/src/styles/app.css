@@ -160,6 +160,61 @@ main {
   color: white;
 }
 
+.folder-input-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.folder-input-row input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem;
+  font-family: ui-monospace, monospace;
+}
+
+.folder-input-row button {
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+.folder-input-row button:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.add-folder-info {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.add-folder-info.empty {
+  border-color: #b58f2a;
+  color: #d8b463;
+}
+
+.add-folder-info.ok {
+  border-color: #4a8f4f;
+  color: #98d098;
+}
+
+.add-folder-info.err {
+  border-color: #a44a4a;
+  color: #e09090;
+}
+
 .now-playing {
   display: flex;
   gap: 1rem;

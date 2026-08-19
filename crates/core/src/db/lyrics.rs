@@ -13,13 +13,26 @@ pub fn upsert_lyrics(
     language: &str,
     source: &str,
 ) -> rusqlite::Result<()> {
-    conn.execute(
+    mimir_telemetry::log(
+        "DEBUG",
+        "lyrics",
+        &format!(
+            "upsert_lyrics track_id={track_id} bytes={} lang={language} source={source}",
+            text.len()
+        ),
+    );
+    let n = conn.execute(
         "INSERT INTO lyrics (track_id, language, text, source) \
          VALUES (?1, ?2, ?3, ?4) \
          ON CONFLICT(track_id, language) DO UPDATE SET \
             text = excluded.text, source = excluded.source",
         params![track_id, language, text, source],
     )?;
+    mimir_telemetry::log(
+        "INFO",
+        "lyrics",
+        &format!("upsert_lyrics track_id={track_id} rows={n}"),
+    );
     Ok(())
 }
 
@@ -34,6 +47,11 @@ pub fn track_lyrics(
     conn: &Connection,
     track_id: i64,
 ) -> Result<Option<LyricsRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "lyrics",
+        &format!("track_lyrics track_id={track_id}"),
+    );
     let row: Option<(String, String, String)> = conn
         .query_row(
             "SELECT text, language, source FROM lyrics \
@@ -44,9 +62,15 @@ pub fn track_lyrics(
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
-    Ok(row.map(|(t, l, s)| LyricsRow {
+    let out = row.map(|(t, l, s)| LyricsRow {
         text: t,
         language: l,
         source: s,
-    }))
+    });
+    mimir_telemetry::log(
+        "INFO",
+        "lyrics",
+        &format!("track_lyrics track_id={track_id} present={}", out.is_some()),
+    );
+    Ok(out)
 }
