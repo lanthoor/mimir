@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use super::transport::TransportState;
+use mimir_telemetry as telemetry;
 
 #[derive(Debug, Error)]
 pub enum PlayerError {
@@ -114,6 +115,11 @@ pub(crate) type SharedBuffer = Arc<Mutex<BufferState>>;
 pub(crate) struct BufferState {
     pub samples: Vec<f32>,
     pub position: usize,
+    /// Sample rate of the audio currently in `samples`. After resampling
+    /// this matches the cpal output device's rate.
+    pub sample_rate: u32,
+    /// Channel count of the audio currently in `samples`.
+    pub channels: u16,
 }
 
 impl BufferState {
@@ -121,6 +127,8 @@ impl BufferState {
         Self {
             samples: Vec::new(),
             position: 0,
+            sample_rate: 0,
+            channels: 0,
         }
     }
 
@@ -181,6 +189,7 @@ impl OutputStream for NoopOutputStream {
 /// `Stop` (or replaced on the next `Play`).
 #[allow(clippy::needless_pass_by_value)]
 fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) {
+    telemetry::log("INFO", "audio.player", "worker_loop starting");
     let mut output: Option<Box<dyn OutputStream>> = None;
     let buffer: SharedBuffer = Arc::new(Mutex::new(BufferState::empty()));
     // Side buffer that holds the pre-decoded "next" track. The output
@@ -189,23 +198,63 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
     // without a gap.
     let next_buffer: SharedBuffer = Arc::new(Mutex::new(BufferState::empty()));
     let gain_db: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
+    // Sample rate of the active cpal output stream. `None` until the first
+    // successful Play. Used to resample newly-decoded buffers to the device
+    // rate so 192 kHz FLAC plays at 48 kHz (or whatever the device supports)
+    // instead of stalling or sounding pitched-up.
+    let mut device_rate: Option<u32> = None;
+    let mut cmd_n = 0u64;
 
     while let Ok(cmd) = rx.recv() {
+        cmd_n += 1;
+        telemetry::log(
+            "DEBUG",
+            "audio.player",
+            &format!("recv cmd #{cmd_n} = {cmd:?}"),
+        );
         match cmd {
             PlayerCommand::SetReplayGainDb(g) => {
                 *gain_db.lock().expect("gain poisoned") = g;
+                telemetry::log(
+                    "INFO",
+                    "audio.player",
+                    &format!("gain set to {g:?}"),
+                );
             }
             PlayerCommand::PrepareNext(path) => {
                 let gain = *gain_db.lock().expect("gain poisoned");
-                if let Err(e) = decode_to_buffer_with_gain(&path, &next_buffer, gain) {
-                    eprintln!("prepare_next decode failed: {e}");
-                } else {
-                    let mut snapshot = shared.lock().expect("player poisoned");
-                    snapshot.next_prepared = Some(path);
+                match decode_to_buffer_with_gain(&path, &next_buffer, gain) {
+                    Ok(()) => {
+                        if let Some(r) = device_rate {
+                            maybe_resample_buffer(&next_buffer, r);
+                        }
+                        let mut snapshot = shared.lock().expect("player poisoned");
+                        snapshot.next_prepared = Some(path.clone());
+                        telemetry::log(
+                            "INFO",
+                            "audio.player",
+                            &format!("prepare_next ok path={}", path.display()),
+                        );
+                    }
+                    Err(e) => {
+                        telemetry::log(
+                            "ERROR",
+                            "audio.player",
+                            &format!("prepare_next decode failed path={} err={e}", path.display()),
+                        );
+                    }
                 }
             }
             PlayerCommand::Play(path) => {
                 let gain = *gain_db.lock().expect("gain poisoned");
+                telemetry::log(
+                    "INFO",
+                    "audio.player",
+                    &format!(
+                        "Play start path={} gain_db={gain:?}",
+                        path.display()
+                    ),
+                );
                 match decode_to_buffer_with_gain(&path, &buffer, gain) {
                     Ok(()) => {
                         {
@@ -213,9 +262,37 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                             snapshot.current = Some(path.clone());
                             snapshot.state = TransportState::Playing;
                         }
-                        output = open_output_stream(&buffer).ok();
+                        match open_output_stream(&buffer) {
+                            Ok((stream, rate)) => {
+                                device_rate = Some(rate);
+                                maybe_resample_buffer(&buffer, rate);
+                                // Same for the pre-decoded next track, if any.
+                                maybe_resample_buffer(&next_buffer, rate);
+                                output = Some(stream);
+                                telemetry::log(
+                                    "INFO",
+                                    "audio.player",
+                                    &format!("output stream opened device_rate={rate}"),
+                                );
+                            }
+                            Err(e) => {
+                                telemetry::log(
+                                    "WARN",
+                                    "audio.player",
+                                    &format!("output stream unavailable: {e}"),
+                                );
+                            }
+                        }
                     }
-                    Err(_e) => {
+                    Err(e) => {
+                        telemetry::log(
+                            "ERROR",
+                            "audio.player",
+                            &format!(
+                                "Play decode failed path={} err={e}",
+                                path.display()
+                            ),
+                        );
                         let mut snapshot = shared.lock().expect("player poisoned");
                         snapshot.current = Some(path);
                         snapshot.state = TransportState::Stopped;
@@ -228,6 +305,11 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                 if let Some(o) = output.as_ref() {
                     o.pause();
                 }
+                telemetry::log(
+                    "INFO",
+                    "audio.player",
+                    &format!("paused state={:?}", snapshot.state),
+                );
             }
             PlayerCommand::Resume => {
                 let mut snapshot = shared.lock().expect("player poisoned");
@@ -235,6 +317,11 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                 if let Some(o) = output.as_ref() {
                     o.resume();
                 }
+                telemetry::log(
+                    "INFO",
+                    "audio.player",
+                    &format!("resumed state={:?}", snapshot.state),
+                );
             }
             PlayerCommand::Stop => {
                 let mut snapshot = shared.lock().expect("player poisoned");
@@ -244,11 +331,23 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                     o.stop();
                 }
                 buffer.lock().expect("buffer poisoned").position = 0;
+                telemetry::log("INFO", "audio.player", "stopped");
             }
             // Queue/Next/Previous are wired in a later commit.
-            PlayerCommand::Enqueue(_) | PlayerCommand::Next | PlayerCommand::Previous => {}
+            PlayerCommand::Enqueue(_) | PlayerCommand::Next | PlayerCommand::Previous => {
+                telemetry::log(
+                    "DEBUG",
+                    "audio.player",
+                    "queue/next/prev: deferred (no-op)",
+                );
+            }
         }
     }
+    telemetry::log(
+        "INFO",
+        "audio.player",
+        &format!("worker_loop exiting after {cmd_n} cmds"),
+    );
 }
 
 /// Decode `path` into the shared buffer, applying `gain_db` (`ReplayGain` or
@@ -262,23 +361,100 @@ pub(crate) fn decode_to_buffer_with_gain(
     buffer: &SharedBuffer,
     gain_db: Option<f64>,
 ) -> Result<(), PlayerError> {
+    let t_start = std::time::Instant::now();
+    telemetry::log(
+        "DEBUG",
+        "audio.player",
+        &format!("decode_to_buffer start path={} gain={gain_db:?}", path.display()),
+    );
     let mut audio =
         super::decode::decode_file(path).map_err(|e| PlayerError::Decode(e.to_string()))?;
+    let t_decode = t_start.elapsed();
+    telemetry::log(
+        "WARN",
+        "audio.player",
+        &format!(
+            "decode_to_buffer: decoded path={} samples={} channels={} rate={} took={:?} (HiRes FLACs decode in tens of seconds — ponytail: streaming decode is deferred)",
+            path.display(),
+            audio.samples.len(),
+            audio.channels,
+            audio.sample_rate,
+            t_decode
+        ),
+    );
     if let Some(g) = gain_db {
         super::gain::apply_gain_db_inplace(&mut audio.samples, g);
     }
+    let n = audio.samples.len();
+    let sr = audio.sample_rate;
+    let ch = audio.channels;
     let mut state = buffer.lock().expect("buffer poisoned");
     state.samples = audio.samples;
     state.position = 0;
+    state.sample_rate = sr;
+    state.channels = ch;
+    telemetry::log(
+        "INFO",
+        "audio.player",
+        &format!(
+            "decode_to_buffer ok path={} samples={n} sample_rate={sr} channels={ch} decode_wall_time={:?}",
+            path.display(),
+            t_decode
+        ),
+    );
     Ok(())
 }
 
-/// Open a cpal output stream that drains `buffer`. Returns `None` when no
-/// output device is available (so the worker reaches the end of the song
-/// without crashing).
+/// Resample `buffer` from its current `sample_rate` to `device_rate` if they
+/// differ. No-op when rates match or when the buffer is empty.
+pub(crate) fn maybe_resample_buffer(buffer: &SharedBuffer, device_rate: u32) {
+    let mut state = buffer.lock().expect("buffer poisoned");
+    if state.samples.is_empty() || state.sample_rate == 0 {
+        return;
+    }
+    if state.sample_rate == device_rate {
+        telemetry::log(
+            "DEBUG",
+            "audio.player",
+            &format!("resample no-op: rate={device_rate} already matches"),
+        );
+        return;
+    }
+    let src_rate = state.sample_rate;
+    let channels = state.channels;
+    telemetry::log(
+        "INFO",
+        "audio.player",
+        &format!(
+            "resampling buffer src={src_rate} → device={device_rate} ch={channels} samples={}",
+            state.samples.len()
+        ),
+    );
+    let before_n = state.samples.len();
+    let resampled = super::resampler::resample_interleaved(
+        &state.samples,
+        channels,
+        src_rate,
+        device_rate,
+    );
+    let after_n = resampled.len();
+    state.samples = resampled;
+    state.position = 0;
+    state.sample_rate = device_rate;
+    telemetry::log(
+        "INFO",
+        "audio.player",
+        &format!("resample done samples={before_n} → {after_n}"),
+    );
+}
+
+/// Open a cpal output stream that drains `buffer`. Returns `(stream, rate)` so
+/// the caller can resample freshly-decoded buffers to the device rate.
 #[cfg(feature = "output")]
 #[allow(clippy::cast_possible_truncation)]
-fn open_output_stream(buffer: &SharedBuffer) -> Result<Box<dyn OutputStream>, PlayerError> {
+fn open_output_stream(
+    buffer: &SharedBuffer,
+) -> Result<(Box<dyn OutputStream>, u32), PlayerError> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     let host = cpal::default_host();
@@ -288,8 +464,11 @@ fn open_output_stream(buffer: &SharedBuffer) -> Result<Box<dyn OutputStream>, Pl
     let config = device
         .default_output_config()
         .map_err(|e| PlayerError::Output(format!("default output config: {e}")))?;
+    let device_rate = config.sample_rate().0;
 
-    let err_fn = |err: cpal::StreamError| eprintln!("cpal stream error: {err}");
+    let err_fn = |err: cpal::StreamError| {
+        telemetry::log("ERROR", "player", &format!("cpal stream error: {err}"));
+    };
 
     let stream = match config.sample_format() {
         cpal::SampleFormat::F32 => {
@@ -344,10 +523,12 @@ fn open_output_stream(buffer: &SharedBuffer) -> Result<Box<dyn OutputStream>, Pl
         .play()
         .map_err(|e| PlayerError::Output(format!("stream play: {e}")))?;
 
-    Ok(Box::new(CpalOutputStream(stream)))
+    Ok((Box::new(CpalOutputStream(stream)), device_rate))
 }
 
 #[cfg(not(feature = "output"))]
-fn open_output_stream(_buffer: &SharedBuffer) -> Result<Box<dyn OutputStream>, PlayerError> {
-    Ok(Box::new(NoopOutputStream))
+fn open_output_stream(
+    _buffer: &SharedBuffer,
+) -> Result<(Box<dyn OutputStream>, u32), PlayerError> {
+    Ok((Box::new(NoopOutputStream), 48_000))
 }

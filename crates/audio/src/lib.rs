@@ -13,6 +13,7 @@ pub mod gain;
 #[cfg(feature = "output")]
 pub mod output;
 pub mod player;
+pub mod resampler;
 pub mod transport;
 
 pub use decode::{decode_file, AudioBufferOut as AudioBuffer, DecodeError};

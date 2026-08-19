@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use mimir_telemetry as telemetry;
 use symphonia::core::audio::{AudioBuffer, AudioBufferRef};
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymError;
@@ -45,6 +46,11 @@ const fn unsupported(err: &SymError) -> bool {
 /// Decodes the *first* audio track in the container to completion. For Tier
 /// 0's single-track-per-file assumption this is sufficient.
 pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
+    telemetry::log(
+        "INFO",
+        "audio.decode",
+        &format!("start path={}", path.display()),
+    );
     let file = std::fs::File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
 
@@ -56,6 +62,11 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
             &symphonia::core::meta::MetadataOptions::default(),
         )
         .map_err(|e| {
+            telemetry::log(
+                "ERROR",
+                "audio.decode",
+                &format!("probe failed path={} err={e}", path.display()),
+            );
             if unsupported(&e) {
                 DecodeError::UnsupportedFormat
             } else {
@@ -69,7 +80,14 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or(DecodeError::NoTracks)?;
+        .ok_or_else(|| {
+            telemetry::log(
+                "WARN",
+                "audio.decode",
+                &format!("no audio tracks in {}", path.display()),
+            );
+            DecodeError::NoTracks
+        })?;
 
     let track_id = track.id;
     let sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
@@ -79,10 +97,20 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
         .map_or(2, symphonia::core::audio::Channels::count);
     let channels =
         u16::try_from(channel_count).map_err(|_| DecodeError::TooManyChannels(channel_count))?;
+    telemetry::log(
+        "DEBUG",
+        "audio.decode",
+        &format!("track id={track_id} sample_rate={sample_rate} channels={channel_count}"),
+    );
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| {
+            telemetry::log(
+                "ERROR",
+                "audio.decode",
+                &format!("decoder init failed path={} err={e}", path.display()),
+            );
             if unsupported(&e) {
                 DecodeError::UnsupportedFormat
             } else {
@@ -91,14 +119,29 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
         })?;
 
     let mut samples: Vec<f32> = Vec::new();
+    let mut packets = 0u64;
+    let mut decoder_errors = 0u64;
 
     loop {
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(SymError::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                telemetry::log(
+                    "DEBUG",
+                    "audio.decode",
+                    &format!(
+                        "EOF reached packets={packets} samples={}",
+                        samples.len()
+                    ),
+                );
                 break;
             }
             Err(e) => {
+                telemetry::log(
+                    "ERROR",
+                    "audio.decode",
+                    &format!("next_packet err path={} err={e}", path.display()),
+                );
                 return Err(DecodeError::Decode(e.to_string()));
             }
         };
@@ -107,15 +150,30 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
             continue;
         }
 
+        packets += 1;
         match decoder.decode(&packet) {
             Ok(audio) => interleave(&audio, &mut samples),
             Err(SymError::DecodeError(_) | SymError::ResetRequired) => {
-                // Recoverable per-packet errors — skip.
+                decoder_errors += 1;
+                telemetry::log(
+                    "WARN",
+                    "audio.decode",
+                    &format!("recoverable decoder err n={decoder_errors} samples={}", samples.len()),
+                );
             }
             Err(e) => return Err(DecodeError::Decode(e.to_string())),
         }
     }
 
+    telemetry::log(
+        "INFO",
+        "audio.decode",
+        &format!(
+            "done path={} packets={packets} samples={} decoder_errors={decoder_errors}",
+            path.display(),
+            samples.len()
+        ),
+    );
     Ok(AudioBufferOut {
         samples,
         sample_rate,

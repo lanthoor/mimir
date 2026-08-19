@@ -71,6 +71,11 @@ impl EqState {
         if self.is_passthrough() {
             return;
         }
+        mimir_telemetry::log(
+            "DEBUG",
+            "audio.eq",
+            &format!("process n={} bands={}", samples.len(), self.coeffs.len()),
+        );
         for sample in samples.iter_mut() {
             let mut x = *sample;
             for (i, c) in self.coeffs.iter().enumerate() {
