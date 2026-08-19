@@ -28,6 +28,8 @@ const $nav = document.querySelectorAll("nav button[data-view]");
 const $addFolder = document.getElementById("add-folder");
 const $addFolderDialog = document.getElementById("add-folder-dialog");
 const $addFolderPath = document.getElementById("add-folder-path");
+const $addFolderBrowse = document.getElementById("add-folder-browse");
+const $addFolderInfo = document.getElementById("add-folder-info");
 const $status = document.getElementById("status");
 const $editDialog = document.getElementById("edit-track-dialog");
 const $editForm = document.getElementById("edit-track-form");
@@ -159,19 +161,24 @@ async function refresh() {
     if (state.view === "tracks") {
       const hasFilter =
         Object.values(state.filter).some((v) => v != null);
-      state.items = hasFilter
-        ? await invoke("library_query_tracks", {
-            genre: state.filter.genre,
-            year: state.filter.year,
-            artistId: state.filter.artistId,
-            albumId: state.filter.albumId,
-            limit: 100,
-            offset: 0,
-          })
-        : await invoke("library_search", {
-            query: state.query,
-            limit: 100,
-          });
+      const q = state.query.trim();
+      // Three-way: faceted query > text search > plain list. FTS rejects
+      // an empty query so we fall through to list_tracks for the no-input
+      // case (otherwise the Tracks view is blank until you type).
+      if (hasFilter) {
+        state.items = await invoke("library_query_tracks", {
+          genre: state.filter.genre,
+          year: state.filter.year,
+          artistId: state.filter.artistId,
+          albumId: state.filter.albumId,
+          limit: 100,
+          offset: 0,
+        });
+      } else if (q.length > 0) {
+        state.items = await invoke("library_search", { query: q, limit: 100 });
+      } else {
+        state.items = await invoke("library_list_tracks", { limit: 100, offset: 0 });
+      }
     } else if (state.view === "albums") {
       const albums = await invoke("library_list_albums", { limit: 200, offset: 0 });
       state.items = albums;
@@ -238,18 +245,83 @@ $addFolder.addEventListener("click", () => {
 });
 
 $addFolderDialog.addEventListener("close", async () => {
-  if ($addFolderDialog.returnValue === "default") {
-    const path = $addFolderPath.value.trim();
-    if (!path) return;
-    try {
-      await invoke("library_add_folder", { path });
-      await refresh();
-    } catch (e) {
-      console.error("add_folder failed:", e);
-      alert(`Add folder failed: ${e?.message ?? e}`);
-    }
+  if ($addFolderDialog.returnValue !== "default") return;
+  const path = $addFolderPath.value.trim();
+  if (!path) return;
+  try {
+    const result = await invoke("library_add_folder", { path });
+    console.log(
+      `library_add_folder: ${path} -> folder_id=${result.folder_id} ` +
+        `walked=${result.summary.walked} sent=${result.summary.sent} ` +
+        `known=${result.summary.known} hashed_fail=${result.summary.hashed_fail}`,
+    );
+    state.library.last_error = describeAddResult(path, result);
+    renderStatus();
+    await refresh();
+  } catch (e) {
+    console.error("add_folder failed:", e);
+    const msg = (e && (e.message ?? e?.toString())) || JSON.stringify(e);
+    state.library.last_error = `Add folder failed: ${msg}`;
+    renderStatus();
   }
 });
+
+function describeAddResult(path, result) {
+  const s = result.summary || {};
+  if (s.sent > 0) {
+    return `Added ${s.sent} new tracks from ${path} (skipped ${s.known} known, ${s.hashed_fail} unreadable).`;
+  }
+  if (s.walked === 0) {
+    return `Found 0 audio files under ${path} — is the directory empty? ` +
+      `mimir looks for .mp3, .flac, .wav, .m4a, .aac, .ogg, .opus, .aif/.aiff, .alac.`;
+  }
+  if (s.hashed_fail > 0) {
+    return `Scanned ${s.walked} files under ${path} but ${s.hashed_fail} failed to read; existing DB rows unchanged.`;
+  }
+  return `Scanned ${path}: walked=${s.walked} sent=${s.sent} known=${s.known}.`;
+}
+
+if ($addFolderBrowse) {
+  $addFolderBrowse.addEventListener("click", async () => {
+    // tauri-plugin-dialog exposes `open` via window.__TAURI__.dialog.
+    const dialog = window.__TAURI__ && window.__TAURI__.dialog;
+    if (!dialog) {
+      showInfo("Folder picker unavailable in this build.", "err");
+      return;
+    }
+    try {
+      const picked = await dialog.open({
+        directory: true,
+        multiple: false,
+        title: "Select a music folder",
+      });
+      if (typeof picked === "string" && picked.length > 0) {
+        $addFolderPath.value = picked;
+        showInfo(
+          `Picked ${picked}. Click "Add" to scan.`,
+          "ok",
+        );
+      }
+    } catch (e) {
+      console.error("folder picker failed:", e);
+      showInfo(
+        `Folder picker failed: ${e?.message ?? JSON.stringify(e)}`,
+        "err",
+      );
+    }
+  });
+}
+
+function showInfo(text, kind) {
+  if (!$addFolderInfo) return;
+  $addFolderInfo.textContent = text;
+  $addFolderInfo.classList.remove("ok", "err", "empty");
+  if (kind) $addFolderInfo.classList.add(kind);
+}
+
+// Reset the info bar whenever the dialog opens.
+$addFolderDialog.addEventListener("show", () => showInfo("", null));
+$addFolderPath.addEventListener("input", () => showInfo("", null));
 
 async function openTrackEditor(trackId) {
   try {
@@ -361,6 +433,7 @@ if (window.__TAURI__ && window.__TAURI__.window) {
   });
 }
 
-// Initial paint (empty) + status check.
+// Initial paint (empty) + status check + first listing.
 render();
 refreshStatus();
+refresh().catch((e) => console.error("initial refresh failed:", e));
