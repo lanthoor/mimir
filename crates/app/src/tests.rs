@@ -278,3 +278,31 @@ fn update_track_applies_patch() {
     assert_eq!(title, "New Title");
     assert_eq!(genre, "Rock");
 }
+
+#[cfg(feature = "tauri")]
+#[test]
+fn track_lyrics_returns_seeded_payload() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title) \
+         VALUES ('/t.mp3', 21, 0, 0, 'mp3', 't')",
+        [],
+    )
+    .expect("track");
+    let track_id: i64 = conn
+        .query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+        .expect("track_id");
+    mimir_core::db::upsert_lyrics(&conn, track_id, "all you need is love", "und", "embedded")
+        .expect("lyrics");
+
+    let row = state
+        .track_lyrics(track_id)
+        .expect("fetch")
+        .expect("present");
+    assert_eq!(row.text, "all you need is love");
+    assert_eq!(row.source, "embedded");
+}

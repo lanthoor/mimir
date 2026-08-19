@@ -278,6 +278,17 @@ impl AppState {
         Ok(())
     }
 
+    /// Lyrics for a track, if any.
+    #[cfg(feature = "tauri")]
+    pub fn track_lyrics(
+        &self,
+        track_id: i64,
+    ) -> Result<Option<mimir_core::db::LyricsRow>, AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        Ok(mimir_core::db::track_lyrics(&conn, track_id)?)
+    }
+
     pub fn transport(&self) -> Transport {
         self.inner.lock().expect("state poisoned").transport.clone()
     }

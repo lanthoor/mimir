@@ -4,6 +4,7 @@ mod cover_art;
 mod edit;
 mod error;
 mod library;
+mod lyrics;
 mod migrations;
 mod pool;
 
@@ -14,3 +15,4 @@ pub use cover_art::{album_cover, attach_album_cover, detach_album_cover, CoverRo
 pub use edit::{update_track, TrackPatch, UpdateError};
 pub use error::DbError;
 pub use library::Library;
+pub use lyrics::{track_lyrics, upsert_lyrics, LyricsRow};

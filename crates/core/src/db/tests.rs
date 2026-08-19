@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use crate::db::{
-    album_cover, attach_album_cover, detach_album_cover, update_track, Library, TrackPatch,
-    UpdateError,
+    album_cover, attach_album_cover, detach_album_cover, track_lyrics, update_track, upsert_lyrics,
+    Library, TrackPatch, UpdateError,
 };
 use crate::metadata::{upsert_album, upsert_artist, CoverArt};
 
@@ -343,4 +343,50 @@ fn update_track_empty_patch_is_noop() {
     let id = insert_track(&conn, "/t.mp3", 3);
     let result = update_track(&conn, id, &TrackPatch::default()).expect("noop");
     assert_eq!(result, id);
+}
+
+#[test]
+fn upsert_lyrics_round_trip() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let id = insert_track(&conn, "/t.mp3", 1);
+
+    upsert_lyrics(&conn, id, "all you need is love", "eng", "embedded").expect("upsert");
+    let row = track_lyrics(&conn, id).expect("fetch").expect("present");
+    assert_eq!(row.text, "all you need is love");
+    assert_eq!(row.language, "eng");
+    assert_eq!(row.source, "embedded");
+}
+
+#[test]
+fn upsert_lyrics_replaces_existing_language() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let id = insert_track(&conn, "/t.mp3", 2);
+
+    upsert_lyrics(&conn, id, "old", "eng", "embedded").expect("first");
+    upsert_lyrics(&conn, id, "new", "eng", "embedded").expect("second");
+
+    let row = track_lyrics(&conn, id).expect("fetch").expect("present");
+    assert_eq!(row.text, "new");
+}
+
+#[test]
+fn upsert_lyrics_cascade_deletes_with_track() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let id = insert_track(&conn, "/t.mp3", 3);
+    upsert_lyrics(&conn, id, "bye", "eng", "embedded").expect("upsert");
+
+    conn.execute("DELETE FROM track WHERE id = ?1", [id])
+        .expect("delete");
+
+    let leftover: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM lyrics WHERE track_id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .expect("count");
+    assert_eq!(leftover, 0, "FK cascade must drop lyrics rows");
 }

@@ -18,6 +18,8 @@ const state = {
   // Active facet filters when in 'tracks' view. Any non-null value narrows
   // the listing via library_query_tracks.
   filter: { genre: null, year: null, artistId: null, albumId: null },
+  // Track id most recently double-clicked → drives "now playing" + lyrics.
+  nowPlayingTrackId: null,
 };
 
 const $list = document.getElementById("list");
@@ -35,6 +37,11 @@ const $play = document.getElementById("play");
 const $pause = document.getElementById("pause");
 const $stop = document.getElementById("stop");
 const $next = document.getElementById("next");
+const $npTitle = document.getElementById("np-title");
+const $npArtist = document.getElementById("np-artist");
+const $lyricsToggle = document.getElementById("lyrics-toggle");
+const $lyricsDialog = document.getElementById("lyrics-dialog");
+const $lyricsContent = document.getElementById("lyrics-content");
 
 function render() {
   $list.className = "list " + state.view;
@@ -97,7 +104,13 @@ function renderCard(item) {
     title.textContent = item.title ?? "(untitled)";
     subtitle.textContent =
       [item.artist_name, item.album_title].filter(Boolean).join(" — ") || item.path;
-    card.addEventListener("dblclick", () => invoke("audio_play", { trackId: item.id }));
+    card.addEventListener("dblclick", () => {
+      state.nowPlayingTrackId = item.id;
+      $npTitle.textContent = item.title ?? "(untitled)";
+      $npArtist.textContent = item.artist_name ?? "";
+      refreshLyricsButton(item.id);
+      invoke("audio_play", { trackId: item.id });
+    });
     card.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
       openTrackEditor(item.id);
@@ -298,6 +311,35 @@ $pause.addEventListener("click", () => invoke("audio_pause").catch(console.error
 $stop.addEventListener("click", () => invoke("audio_stop").catch(console.error));
 $next.addEventListener("click", () => invoke("audio_next").catch(console.error));
 $prev.addEventListener("click", () => invoke("audio_previous").catch(console.error));
+
+async function refreshLyricsButton(trackId) {
+  try {
+    const lyrics = await invoke("library_track_lyrics", { trackId });
+    if (lyrics) {
+      $lyricsToggle.hidden = false;
+      $lyricsToggle.dataset.trackId = String(trackId);
+    } else {
+      $lyricsToggle.hidden = true;
+      delete $lyricsToggle.dataset.trackId;
+    }
+  } catch (e) {
+    console.error("lyrics lookup failed:", e);
+    $lyricsToggle.hidden = true;
+  }
+}
+
+$lyricsToggle.addEventListener("click", async () => {
+  const trackId = Number($lyricsToggle.dataset.trackId);
+  if (!trackId) return;
+  try {
+    const lyrics = await invoke("library_track_lyrics", { trackId });
+    if (!lyrics) return;
+    $lyricsContent.textContent = lyrics.text;
+    $lyricsDialog.showModal();
+  } catch (e) {
+    console.error("lyrics fetch failed:", e);
+  }
+});
 
 // Initial paint (empty) + status check.
 render();

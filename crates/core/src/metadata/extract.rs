@@ -20,6 +20,7 @@ pub struct Tags {
     pub year: Option<u32>,
     pub genre: Option<String>,
     pub composer: Option<String>,
+    pub lyrics: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -59,6 +60,7 @@ fn extract_from_tagged(tagged: &lofty::file::TaggedFile) -> Tags {
         year: read_u32(primary, &ItemKey::Year),
         genre: read_str(primary, &ItemKey::Genre),
         composer: read_str(primary, &ItemKey::Composer),
+        lyrics: read_str(primary, &ItemKey::Lyrics),
     }
 }
 
