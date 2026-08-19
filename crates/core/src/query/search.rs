@@ -16,6 +16,7 @@ pub fn search_tracks(
 ) -> Result<Vec<TrackRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
+                t.genre, a.year, \
                 a.id, a.title, ar.id, ar.name \
          FROM track_fts f \
          JOIN track t ON t.id = f.rowid \

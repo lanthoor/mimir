@@ -179,6 +179,20 @@ impl AppState {
         Ok(mimir_core::query::list_albums(&conn, limit, offset)?)
     }
 
+    /// Distinct genres in the library.
+    pub fn list_genres(&self) -> Result<Vec<mimir_core::query::GenreRow>, AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        Ok(mimir_core::query::list_genres(&conn)?)
+    }
+
+    /// Distinct years (from albums) in the library.
+    pub fn list_years(&self) -> Result<Vec<mimir_core::query::YearRow>, AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        Ok(mimir_core::query::list_years(&conn)?)
+    }
+
     pub fn transport(&self) -> Transport {
         self.inner.lock().expect("state poisoned").transport.clone()
     }

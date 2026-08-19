@@ -13,6 +13,8 @@ pub struct TrackRow {
     pub disc_no: Option<i32>,
     pub duration_ms: Option<i32>,
     pub codec: String,
+    pub genre: Option<String>,
+    pub year: Option<i32>,
     pub album_id: Option<i64>,
     pub album_title: Option<String>,
     pub artist_id: Option<i64>,
@@ -27,6 +29,7 @@ pub fn list_tracks(
 ) -> Result<Vec<TrackRow>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
+                t.genre, a.year, \
                 a.id, a.title, ar.id, ar.name \
          FROM track t \
          LEFT JOIN album a  ON a.id  = t.album_id \
@@ -50,9 +53,61 @@ pub(crate) fn row_to_track(row: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
         disc_no: row.get(4)?,
         duration_ms: row.get(5)?,
         codec: row.get(6)?,
-        album_id: row.get(7)?,
-        album_title: row.get(8)?,
-        artist_id: row.get(9)?,
-        artist_name: row.get(10)?,
+        genre: row.get(7)?,
+        year: row.get(8)?,
+        album_id: row.get(9)?,
+        album_title: row.get(10)?,
+        artist_id: row.get(11)?,
+        artist_name: row.get(12)?,
     })
+}
+
+/// List distinct genres present in the library, sorted alphabetically.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GenreRow {
+    pub name: String,
+    pub track_count: i64,
+}
+
+pub fn list_genres(conn: &Connection) -> Result<Vec<GenreRow>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT genre, COUNT(*) \
+         FROM track \
+         WHERE genre IS NOT NULL AND genre <> '' \
+         GROUP BY genre \
+         ORDER BY genre COLLATE NOCASE",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(GenreRow {
+            name: row.get(0)?,
+            track_count: row.get(1)?,
+        })
+    })?;
+    let out: Vec<GenreRow> = rows.collect::<Result<_, _>>()?;
+    Ok(out)
+}
+
+/// List distinct years from albums, with track counts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct YearRow {
+    pub year: i32,
+    pub track_count: i64,
+}
+
+pub fn list_years(conn: &Connection) -> Result<Vec<YearRow>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT a.year, COUNT(t.id) \
+         FROM album a JOIN track t ON t.album_id = a.id \
+         WHERE a.year IS NOT NULL \
+         GROUP BY a.year \
+         ORDER BY a.year",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(YearRow {
+            year: row.get(0)?,
+            track_count: row.get(1)?,
+        })
+    })?;
+    let out: Vec<YearRow> = rows.collect::<Result<_, _>>()?;
+    Ok(out)
 }

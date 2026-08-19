@@ -6,7 +6,7 @@ use std::path::Path;
 #[cfg(feature = "tauri")]
 use mimir_audio::TransportCommand;
 #[cfg(feature = "tauri")]
-use mimir_core::query::{AlbumRow, TrackRow};
+use mimir_core::query::{AlbumRow, GenreRow, TrackRow, YearRow};
 
 #[cfg(feature = "tauri")]
 use crate::error::AppError;
@@ -72,6 +72,20 @@ pub fn library_list_albums(
     offset: Option<i64>,
 ) -> Result<Vec<AlbumRow>, AppError> {
     state.list_albums(limit.unwrap_or(100), offset.unwrap_or(0))
+}
+
+/// Distinct genres in the library with track counts.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_genres(state: tauri::State<'_, AppState>) -> Result<Vec<GenreRow>, AppError> {
+    state.list_genres()
+}
+
+/// Distinct years (from albums) with track counts.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_years(state: tauri::State<'_, AppState>) -> Result<Vec<YearRow>, AppError> {
+    state.list_years()
 }
 
 /// Start (or replace) playback with the given track id.
