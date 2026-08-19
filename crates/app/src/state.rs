@@ -171,6 +171,19 @@ impl AppState {
         Ok(mimir_core::query::search_tracks(&conn, query, limit)?)
     }
 
+    /// Paged list of tracks. Used for the Tracks view's default render —
+    /// FTS5's `MATCH ''` syntax-errors so a bare search box has to come
+    /// through here.
+    pub fn list_tracks(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::TrackRow>, AppError> {
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        Ok(mimir_core::query::list_tracks(&conn, limit, offset)?)
+    }
+
     /// Return the cover art attached to `album_id`, if any. The cover is
     /// returned as `(mime_type, bytes)` so the front-end can render it
     /// directly via a `data:` URL or `Blob`.

@@ -126,6 +126,18 @@ pub fn library_query_tracks(
     )
 }
 
+/// Paged list of tracks. Used for the Tracks view's default render so the
+/// UI never asks FTS to match an empty query (which is a SQLite syntax error).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_tracks(
+    state: tauri::State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<TrackRow>, AppError> {
+    state.list_tracks(limit.unwrap_or(100), offset.unwrap_or(0))
+}
+
 /// Editable tags for a single track.
 #[cfg(feature = "tauri")]
 #[derive(Debug, Clone, serde::Serialize)]
