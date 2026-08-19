@@ -5,8 +5,8 @@ use rusqlite::Connection;
 use crate::db::Library;
 use crate::metadata::ingest;
 use crate::query::{
-    list_albums, list_artists, list_genres, list_tracks, list_years, search_tracks, AlbumRow,
-    ArtistRow, TrackRow,
+    list_albums, list_artists, list_genres, list_tracks, list_tracks_filtered, list_years,
+    search_tracks, AlbumRow, ArtistRow, TrackFilter, TrackRow,
 };
 use crate::scanner::{hash_file, ScanJob};
 
@@ -262,4 +262,168 @@ fn list_years_groups_and_counts_by_album_year() {
     let years = list_years(&conn).expect("list");
     let pairs: Vec<(i32, i64)> = years.iter().map(|y| (y.year, y.track_count)).collect();
     assert_eq!(pairs, vec![(1997, 2), (2000, 1)]);
+}
+
+fn seed_filter_env(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO artist (name, sort_name) VALUES ('Björk', 'Bjork')",
+        [],
+    )
+    .expect("artist");
+    let artist_id: i64 = conn
+        .query_row("SELECT id FROM artist WHERE name = 'Björk'", [], |row| {
+            row.get(0)
+        })
+        .expect("artist_id");
+    conn.execute(
+        "INSERT INTO album (title, album_artist_id, year) VALUES ('Homogenic', ?1, 1997)",
+        [artist_id],
+    )
+    .expect("album");
+    let album_id: i64 = conn
+        .query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+        .expect("album_id");
+
+    let album_other_id: i64 = {
+        conn.execute(
+            "INSERT INTO album (title, album_artist_id, year) VALUES ('Vespertine', ?1, 2001)",
+            [artist_id],
+        )
+        .expect("album");
+        conn.query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+            .expect("album_id")
+    };
+
+    for (tidx, (path, genre, album_id_local)) in [
+        ("/a/01.mp3", Some("Electronic"), album_id),
+        ("/a/02.mp3", Some("Electronic"), album_id),
+        ("/a/03.mp3", Some("Pop"), album_id),
+        ("/a/04.mp3", None, album_id),
+        ("/v/01.mp3", Some("Electronic"), album_other_id),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, t)| {
+        (
+            i64::from(u32::try_from(i).expect("test idx fits u32")) + 1,
+            t,
+        )
+    }) {
+        conn.execute(
+            "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, genre, album_id) \
+             VALUES (?1, ?4, 0, 0, 'mp3', 't', ?2, ?3)",
+            rusqlite::params![path, genre, album_id_local, tidx],
+        )
+        .expect("track");
+    }
+}
+
+#[test]
+fn list_tracks_filtered_by_genre_only() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    seed_filter_env(&conn);
+
+    let rows = list_tracks_filtered(
+        &conn,
+        &TrackFilter {
+            genre: Some("Electronic".into()),
+            ..TrackFilter::default()
+        },
+        100,
+        0,
+    )
+    .expect("query");
+    assert_eq!(rows.len(), 3);
+    for r in &rows {
+        assert_eq!(r.genre.as_deref(), Some("Electronic"));
+    }
+}
+
+#[test]
+fn list_tracks_filtered_by_year_only() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    seed_filter_env(&conn);
+
+    let rows = list_tracks_filtered(
+        &conn,
+        &TrackFilter {
+            year: Some(1997),
+            ..TrackFilter::default()
+        },
+        100,
+        0,
+    )
+    .expect("query");
+    assert_eq!(rows.len(), 4);
+    for r in &rows {
+        assert_eq!(r.year, Some(1997));
+    }
+}
+
+#[test]
+fn list_tracks_filtered_combines_predicates() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    seed_filter_env(&conn);
+
+    let rows = list_tracks_filtered(
+        &conn,
+        &TrackFilter {
+            genre: Some("Electronic".into()),
+            year: Some(1997),
+            ..TrackFilter::default()
+        },
+        100,
+        0,
+    )
+    .expect("query");
+    assert_eq!(rows.len(), 2);
+    for r in &rows {
+        assert_eq!(r.genre.as_deref(), Some("Electronic"));
+        assert_eq!(r.year, Some(1997));
+    }
+}
+
+#[test]
+fn list_tracks_filtered_empty_returns_all() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    seed_filter_env(&conn);
+
+    let rows = list_tracks_filtered(&conn, &TrackFilter::default(), 100, 0).expect("query");
+    assert_eq!(rows.len(), 5);
+}
+
+#[test]
+fn list_tracks_filtered_pagination() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    seed_filter_env(&conn);
+
+    let p1 = list_tracks_filtered(
+        &conn,
+        &TrackFilter {
+            genre: Some("Electronic".into()),
+            ..TrackFilter::default()
+        },
+        2,
+        0,
+    )
+    .expect("p1");
+    let p2 = list_tracks_filtered(
+        &conn,
+        &TrackFilter {
+            genre: Some("Electronic".into()),
+            ..TrackFilter::default()
+        },
+        2,
+        2,
+    )
+    .expect("p2");
+    assert_eq!(p1.len(), 2);
+    assert_eq!(p2.len(), 1, "third page holds the leftover row");
+    let ids: std::collections::HashSet<_> = p1.iter().chain(p2.iter()).map(|t| t.id).collect();
+    assert_eq!(ids.len(), 3);
 }

@@ -27,6 +27,7 @@ pub fn run() {
             command::library_list_albums,
             command::library_list_genres,
             command::library_list_years,
+            command::library_query_tracks,
             command::library_album_cover,
             command::audio_play,
             command::audio_pause,
