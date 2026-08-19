@@ -341,6 +341,26 @@ $lyricsToggle.addEventListener("click", async () => {
   }
 });
 
+// Tauri v2 emits a window-level drag-drop event when files land on the
+// webview. We only accept directories.
+if (window.__TAURI__ && window.__TAURI__.window) {
+  const { getCurrentWindow } = window.__TAURI__.window;
+  getCurrentWindow().onDragDropEvent(async (event) => {
+    if (event.payload.type !== "drop") return;
+    const paths = (event.payload.paths || []).filter(
+      (p) => typeof p === "string" && p.length > 0,
+    );
+    if (paths.length === 0) return;
+    try {
+      await invoke("library_add_folders", { paths });
+      await refresh();
+    } catch (e) {
+      console.error("drop-add folders failed:", e);
+      alert(`Add folders failed: ${e?.message ?? e}`);
+    }
+  });
+}
+
 // Initial paint (empty) + status check.
 render();
 refreshStatus();

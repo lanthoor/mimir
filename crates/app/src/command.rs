@@ -41,6 +41,20 @@ pub fn library_add_folder(
     state.add_folder(Path::new(&path))
 }
 
+/// Add multiple folders in one call. Returns the list of folder row ids.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_add_folders(
+    state: tauri::State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<i64>, AppError> {
+    let mut ids = Vec::with_capacity(paths.len());
+    for p in paths {
+        ids.push(state.add_folder(Path::new(&p))?);
+    }
+    Ok(ids)
+}
+
 /// Full-text search across the library. Returns matching tracks.
 #[cfg(feature = "tauri")]
 #[tauri::command]

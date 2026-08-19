@@ -23,6 +23,7 @@ pub fn run() {
             command::library_open,
             command::library_status,
             command::library_add_folder,
+            command::library_add_folders,
             command::library_search,
             command::library_list_albums,
             command::library_list_genres,

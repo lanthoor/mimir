@@ -126,6 +126,41 @@ fn add_folder_upserts_and_returns_id() {
 }
 
 #[test]
+fn add_folder_duplicate_path_is_idempotent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let music = dir.path().join("music");
+    std::fs::create_dir_all(&music).expect("mkdir");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let id1 = state.add_folder(&music).expect("first");
+    let id2 = state.add_folder(&music).expect("second");
+    assert_eq!(id1, id2, "duplicate folder path must dedupe");
+}
+
+#[cfg(feature = "tauri")]
+#[test]
+fn add_folders_multi_inserts_distinct_rows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let music1 = dir.path().join("music1");
+    let music2 = dir.path().join("music2");
+    std::fs::create_dir_all(&music1).expect("mkdir");
+    std::fs::create_dir_all(&music2).expect("mkdir");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+
+    let ids = state
+        .add_folders(vec![
+            music1.to_string_lossy().into_owned(),
+            music2.to_string_lossy().into_owned(),
+        ])
+        .expect("multi");
+    assert_eq!(ids.len(), 2);
+    assert_ne!(ids[0], ids[1]);
+}
+
+#[test]
 fn play_track_unknown_id_returns_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = dir.path().join("library.sqlite");
