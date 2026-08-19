@@ -51,6 +51,21 @@
       </form>
     </dialog>
 
+    <dialog id="edit-track-dialog">
+      <form method="dialog" id="edit-track-form">
+        <h2>Edit track</h2>
+        <label>Title <input name="title" type="text" /></label>
+        <label>Genre <input name="genre" type="text" /></label>
+        <label>Year <input name="year" type="number" /></label>
+        <label>Track # <input name="track_no" type="number" min="1" /></label>
+        <label>Disc # <input name="disc_no" type="number" min="1" /></label>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="edit-track-save" value="save">Save</button>
+        </menu>
+      </form>
+    </dialog>
+
     <script type="module" src="./src/js/app.js"></script>
   </body>
 </html>

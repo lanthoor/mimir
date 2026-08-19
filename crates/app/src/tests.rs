@@ -1,6 +1,8 @@
 //! Tests for the app shell.
 
 use mimir_audio::{TransportCommand, TransportState};
+#[cfg(feature = "tauri")]
+use mimir_core::db::TrackPatch;
 use mimir_core::db::{attach_album_cover, CoverRow};
 use mimir_core::metadata::{upsert_album, upsert_artist, CoverArt};
 
@@ -190,4 +192,89 @@ fn list_albums_returns_inserted_album() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].title, "Homogénic");
     assert_eq!(rows[0].year, Some(1997));
+}
+
+#[cfg(feature = "tauri")]
+#[test]
+fn get_editable_track_returns_seed_values() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    conn.execute(
+        "INSERT INTO artist (name, sort_name) VALUES ('Björk', 'Bjork')",
+        [],
+    )
+    .expect("artist");
+    let artist_id: i64 = conn
+        .query_row("SELECT id FROM artist WHERE name = 'Björk'", [], |row| {
+            row.get(0)
+        })
+        .expect("artist_id");
+    conn.execute(
+        "INSERT INTO album (title, album_artist_id, year) VALUES ('Homogenic', ?1, 1997)",
+        [artist_id],
+    )
+    .expect("album");
+    let album_id: i64 = conn
+        .query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+        .expect("album_id");
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, track_no, album_id) \
+         VALUES ('/t.mp3', 7, 0, 0, 'mp3', 'Jóga', 3, ?1)",
+        [album_id],
+    )
+    .expect("track");
+    let track_id: i64 = conn
+        .query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+        .expect("track_id");
+
+    let f = state.get_editable_track(track_id).expect("fields");
+    assert_eq!(f.title.as_deref(), Some("Jóga"));
+    assert_eq!(f.year, Some(1997));
+    assert_eq!(f.track_no, Some(3));
+}
+
+#[cfg(feature = "tauri")]
+#[test]
+fn update_track_applies_patch() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title) \
+         VALUES ('/t.mp3', 11, 0, 0, 'mp3', 'orig')",
+        [],
+    )
+    .expect("track");
+    let track_id: i64 = conn
+        .query_row("SELECT last_insert_rowid()", [], |row| row.get(0))
+        .expect("track_id");
+
+    state
+        .update_track(
+            track_id,
+            TrackPatch {
+                title: Some(Some("New Title".into())),
+                genre: Some(Some("Rock".into())),
+                ..TrackPatch::default()
+            },
+        )
+        .expect("update");
+
+    let title: String = conn
+        .query_row("SELECT title FROM track WHERE id = ?1", [track_id], |row| {
+            row.get(0)
+        })
+        .expect("read");
+    let genre: String = conn
+        .query_row("SELECT genre FROM track WHERE id = ?1", [track_id], |row| {
+            row.get(0)
+        })
+        .expect("read");
+    assert_eq!(title, "New Title");
+    assert_eq!(genre, "Rock");
 }
