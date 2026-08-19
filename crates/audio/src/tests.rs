@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::decode_file;
+use crate::eq::EqState;
 use crate::gain::{apply_gain_db_inplace, db_to_linear};
 use crate::transport::{PlaybackQueue, Transport, TransportCommand, TransportState};
 #[cfg(feature = "output")]
@@ -385,5 +386,37 @@ fn prepare_next_decodes_into_side_buffer() {
     assert!(
         snap.current.is_none(),
         "PrepareNext must not change current"
+    );
+}
+
+#[allow(clippy::cast_precision_loss)]
+#[test]
+fn eq_passthrough_does_not_change_samples() {
+    let mut eq = EqState::new_5band([0.0; 5], 44_100.0);
+    assert!(eq.is_passthrough());
+    let mut samples: Vec<f32> = (0..128).map(|i| (i as f32 / 128.0).sin()).collect();
+    let before = samples.clone();
+    eq.process(&mut samples);
+    for (a, b) in samples.iter().zip(before.iter()) {
+        assert!((a - b).abs() < 1e-5, "passthrough must be transparent");
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+#[test]
+fn eq_boost_changes_signal_when_active() {
+    let mut eq = EqState::new_5band([0.0, 0.0, 6.0, 0.0, 0.0], 44_100.0);
+    assert!(!eq.is_passthrough());
+    // Sine at 1 kHz (the boost centre) — the cascade should boost the peak.
+    let mut samples: Vec<f32> = (0..2048)
+        .map(|i| 0.1 * (2.0 * std::f32::consts::PI * 1_000.0 * (i as f32) / 44_100.0).sin())
+        .collect();
+    let max_before: f32 = samples.iter().copied().fold(0.0_f32, f32::max);
+    eq.process(&mut samples);
+    let max_after: f32 = samples.iter().copied().fold(0.0_f32, f32::max);
+    assert!(
+        max_after > max_before * 1.4,
+        "+6 dB at 1 kHz must boost a 1 kHz sine above the original peak; \
+         before={max_before} after={max_after}"
     );
 }
