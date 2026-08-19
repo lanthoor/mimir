@@ -5,11 +5,12 @@ use std::path::Path;
 use rusqlite::Connection;
 use thiserror::Error;
 
+use crate::db::attach_album_cover;
 use crate::scanner::ScanJob;
 
 use super::extract::{extract_tags, Tags};
 use super::heuristic::{parse_filename, HeuristicTags};
-use super::probe::{probe_file, Probe, ProbeError};
+use super::probe::{extract_cover, probe_file, Probe, ProbeError};
 use super::upsert::{upsert_album, upsert_artist};
 
 #[derive(Debug, Error)]
@@ -54,6 +55,10 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
     } else {
         None
     };
+
+    if let (Some(album_id), Ok(Some(cover))) = (album_id, extract_cover(&path)) {
+        attach_album_cover(conn, album_id, &cover, "embedded")?;
+    }
 
     let tx = conn.unchecked_transaction()?;
 

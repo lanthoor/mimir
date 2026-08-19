@@ -1,6 +1,8 @@
 //! Tests for the app shell.
 
 use mimir_audio::{TransportCommand, TransportState};
+use mimir_core::db::{attach_album_cover, CoverRow};
+use mimir_core::metadata::{upsert_album, upsert_artist, CoverArt};
 
 use crate::AppError;
 use crate::AppState;
@@ -129,4 +131,63 @@ fn play_track_unknown_id_returns_error() {
     state.open_library(&db).expect("open");
     let result = state.play_track(99_999, &TransportCommand::Play(99_999));
     assert!(result.is_err());
+}
+
+#[test]
+fn album_cover_returns_none_when_unattached() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    let artist_id = upsert_artist(&conn, "Björk").expect("artist");
+    let album_id = upsert_album(&conn, "Homogénic", artist_id, None).expect("album");
+
+    let out = state.album_cover(album_id).expect("fetch");
+    assert!(out.is_none(), "unattached album must yield None");
+}
+
+#[test]
+fn album_cover_returns_bytes_when_attached() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    let artist_id = upsert_artist(&conn, "Björk").expect("artist");
+    let album_id = upsert_album(&conn, "Homogénic", artist_id, None).expect("album");
+
+    let cover = CoverArt {
+        mime_type: "image/png".to_string(),
+        data: b"\x89PNG\r\n\x1a\n".to_vec(),
+    };
+    attach_album_cover(&conn, album_id, &cover, "embedded").expect("attach");
+
+    let out = state
+        .album_cover(album_id)
+        .expect("fetch")
+        .expect("present");
+    let (mime, data) = out;
+    assert_eq!(mime, "image/png");
+    assert_eq!(data, cover.data);
+    let _ = CoverRow {
+        mime_type: mime,
+        data,
+    };
+}
+
+#[test]
+fn list_albums_returns_inserted_album() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    let artist_id = upsert_artist(&conn, "Björk").expect("artist");
+    upsert_album(&conn, "Homogénic", artist_id, Some(1997)).expect("album");
+
+    let rows = state.list_albums(100, 0).expect("list");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Homogénic");
+    assert_eq!(rows[0].year, Some(1997));
 }

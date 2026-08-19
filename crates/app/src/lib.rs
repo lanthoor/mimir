@@ -24,6 +24,8 @@ pub fn run() {
             command::library_status,
             command::library_add_folder,
             command::library_search,
+            command::library_list_albums,
+            command::library_album_cover,
             command::audio_play,
             command::audio_pause,
             command::audio_resume,
