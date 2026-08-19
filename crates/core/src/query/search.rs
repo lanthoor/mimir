@@ -73,9 +73,7 @@ pub fn search_tracks(
 /// FTS5's default prefix index needs ≥2 chars.
 fn is_short_simple_token(query: &str) -> bool {
     let trimmed = query.trim();
-    !trimmed.is_empty()
-        && trimmed.len() <= 2
-        && trimmed.chars().all(|c| c.is_alphanumeric())
+    !trimmed.is_empty() && trimmed.len() <= 2 && trimmed.chars().all(char::is_alphanumeric)
 }
 
 /// Turn `que` → `que*` so live-search feels responsive. Multi-token queries
@@ -112,8 +110,7 @@ fn rewrite_as_prefix(query: &str) -> String {
     // Find the last whitespace-separated token.
     let last_start = query
         .rfind(|c: char| c.is_whitespace())
-        .map(|i| i + 1)
-        .unwrap_or(0);
+        .map_or(0, |i| i + 1);
     let last_token = &query[last_start..];
     if last_token.is_empty() {
         return query.to_string();
@@ -130,7 +127,7 @@ fn rewrite_as_prefix(query: &str) -> String {
     }
 
     // Skip if the token is just punctuation.
-    if !last_token.chars().any(|c| c.is_alphanumeric()) {
+    if !last_token.chars().any(char::is_alphanumeric) {
         return query.to_string();
     }
 
