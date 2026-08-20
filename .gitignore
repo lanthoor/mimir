@@ -7,6 +7,9 @@ Cargo.lock.bak
 # Tauri generated scaffolding
 crates/app/gen/
 
+# UI Dist
+#**/ui/dist/
+
 # Editor / OS
 .idea/
 .vscode/
@@ -22,3 +25,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# LeanKG
+.leankg/
+leankg.yaml
