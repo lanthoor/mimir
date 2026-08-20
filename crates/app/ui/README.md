@@ -3,25 +3,16 @@
 The front-end is a vanilla HTML/CSS/JS SPA that calls Tauri v2 IPC commands
 directly via `window.__TAURI__.core.invoke`. **No build step is required.**
 
-The `src/` directory is the source of truth. The `dist/` directory is a
-byte-for-byte copy and is what Tauri actually loads. To rebuild `dist/`:
-
-```sh
-# from the repo root
-cp crates/app/ui/src/index.html        crates/app/ui/dist/
-cp crates/app/ui/src/styles/app.css    crates/app/ui/dist/src/styles/
-cp crates/app/ui/src/js/app.js          crates/app/ui/dist/src/js/
-```
+Tauri loads `ui/src/` directly — edit files there, no copy step.
 
 ## Layout
 
 ```
 ui/
-├── src/         # source of truth — edit these
-│   ├── index.html
-│   ├── styles/app.css
-│   └── js/app.js
-└── dist/        # mirror of src/ — Tauri loads this
+└── src/         # what you edit, what Tauri loads
+    ├── index.html
+    ├── styles/app.css
+    └── js/app.js
 ```
 
 ## Why no bundler?
@@ -31,8 +22,7 @@ ui/
   which is far wider than `"chrome105"`.
 - Reviewers can read the entire front-end in one sitting.
 - Replacing the front-end with a Svelte/React/Vue SPA later is a non-event:
-  swap `src/` for a build output, keep `dist/` pointing at the build's
-  `index.html`.
+  point Tauri at the new build's output directory.
 
 ## Frontend → Rust contract
 
