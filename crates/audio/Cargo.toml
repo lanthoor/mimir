@@ -13,8 +13,7 @@ workspace = true
 [dependencies]
 symphonia = { version = "0.5", features = ["all"] }
 thiserror = "1"
-cpal = { version = "0.15", optional = true }
-rubato = "0.15"
+rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-all"], optional = true }
 mimir-telemetry = { path = "../telemetry" }
 
 [dev-dependencies]
@@ -22,4 +21,7 @@ tempfile = "3"
 
 [features]
 default = []
-output = ["dep:cpal"]
+# rodio handles device open, ring buffer, and on-the-fly sample-rate
+# conversion — the previous cpal + rubato stack pre-resampled the whole
+# decoded buffer on the worker thread.
+output = ["dep:rodio"]

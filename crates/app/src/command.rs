@@ -320,6 +320,8 @@ pub fn audio_play(state: tauri::State<'_, AppState>, track_id: i64) -> Result<()
 #[tauri::command]
 pub fn audio_pause(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
     state.send_transport(TransportCommand::Pause);
+    #[cfg(feature = "output")]
+    state.send_player(mimir_audio::PlayerCommand::Pause);
     Ok(())
 }
 
@@ -327,6 +329,8 @@ pub fn audio_pause(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
 #[tauri::command]
 pub fn audio_resume(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
     state.send_transport(TransportCommand::Resume);
+    #[cfg(feature = "output")]
+    state.send_player(mimir_audio::PlayerCommand::Resume);
     Ok(())
 }
 
@@ -334,6 +338,8 @@ pub fn audio_resume(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
 #[tauri::command]
 pub fn audio_stop(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
     state.send_transport(TransportCommand::Stop);
+    #[cfg(feature = "output")]
+    state.send_player(mimir_audio::PlayerCommand::Stop);
     Ok(())
 }
 
@@ -349,4 +355,34 @@ pub fn audio_next(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
 pub fn audio_previous(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
     state.send_transport(TransportCommand::Previous);
     Ok(())
+}
+
+/// Snapshot of the live audio player — `None` when the `output` feature
+/// is disabled.
+#[cfg(feature = "tauri")]
+#[derive(Debug, serde::Serialize)]
+pub struct PlayerSnapshotOut {
+    pub state: String,
+    pub current: Option<String>,
+    pub next_prepared: Option<String>,
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_player_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<PlayerSnapshotOut>, AppError> {
+    let snap = state.player_snapshot().map(PlayerSnapshotOut::from);
+    Ok(snap)
+}
+
+#[cfg(feature = "tauri")]
+impl From<mimir_audio::PlayerSnapshot> for PlayerSnapshotOut {
+    fn from(s: mimir_audio::PlayerSnapshot) -> Self {
+        Self {
+            state: format!("{:?}", s.state),
+            current: s.current.as_ref().map(|p| p.display().to_string()),
+            next_prepared: s.next_prepared.as_ref().map(|p| p.display().to_string()),
+        }
+    }
 }

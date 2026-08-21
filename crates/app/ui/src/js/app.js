@@ -255,8 +255,6 @@ $addFolderDialog.addEventListener("close", async () => {
         `walked=${result.summary.walked} sent=${result.summary.sent} ` +
         `known=${result.summary.known} hashed_fail=${result.summary.hashed_fail}`,
     );
-    state.library.last_error = describeAddResult(path, result);
-    renderStatus();
     await refresh();
   } catch (e) {
     console.error("add_folder failed:", e);
@@ -265,21 +263,6 @@ $addFolderDialog.addEventListener("close", async () => {
     renderStatus();
   }
 });
-
-function describeAddResult(path, result) {
-  const s = result.summary || {};
-  if (s.sent > 0) {
-    return `Added ${s.sent} new tracks from ${path} (skipped ${s.known} known, ${s.hashed_fail} unreadable).`;
-  }
-  if (s.walked === 0) {
-    return `Found 0 audio files under ${path} — is the directory empty? ` +
-      `mimir looks for .mp3, .flac, .wav, .m4a, .aac, .ogg, .opus, .aif/.aiff, .alac.`;
-  }
-  if (s.hashed_fail > 0) {
-    return `Scanned ${s.walked} files under ${path} but ${s.hashed_fail} failed to read; existing DB rows unchanged.`;
-  }
-  return `Scanned ${path}: walked=${s.walked} sent=${s.sent} known=${s.known}.`;
-}
 
 if ($addFolderBrowse) {
   $addFolderBrowse.addEventListener("click", async () => {
@@ -378,7 +361,14 @@ $editDialog.addEventListener("close", async () => {
   }
 });
 
-$play.addEventListener("click", () => invoke("audio_play", { trackId: 0 }).catch(console.error));
+$play.addEventListener("click", () => {
+  // The toolbar play button restarts the most recently double-clicked
+  // track. Sending `trackId: 0` was a no-op (track_id=0 doesn't exist in
+  // the library) — the toolbar now does nothing until a track is chosen.
+  if (state.nowPlayingTrackId != null) {
+    invoke("audio_play", { trackId: state.nowPlayingTrackId }).catch(console.error);
+  }
+});
 $pause.addEventListener("click", () => invoke("audio_pause").catch(console.error));
 $stop.addEventListener("click", () => invoke("audio_stop").catch(console.error));
 $next.addEventListener("click", () => invoke("audio_next").catch(console.error));
