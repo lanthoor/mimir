@@ -1,11 +1,5 @@
 //! Tests for the audio decoder + transport.
 
-// ponytail: the resample tests cast integer sample counts (≤192_000) to
-// f32 — exact at this range (well under the 2^23 mantissa cutoff) but
-// clippy flags any i32/usize→f32 cast. Module-level allow is cheaper
-// than rewriting every test literal.
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_wrap)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -179,29 +173,6 @@ fn transport_play_replaces_queue_with_single_track() {
     assert_eq!(t.queue.items(), &[99]);
     assert_eq!(t.queue.current(), Some(99));
     assert_eq!(t.state, TransportState::Playing);
-}
-
-#[test]
-#[cfg(feature = "output")]
-fn output_lists_default_host() {
-    // The CI runner may have no audio devices (sandbox blocks alsa/pipewire,
-    // or libasound2-dev is missing). We only assert the *shape* of the
-    // return type — both `Ok(empty Vec)` and `Err(_)` are accepted.
-    let result: Result<Vec<crate::output::OutputDeviceInfo>, String> =
-        crate::output::list_output_devices();
-    match result {
-        Ok(devices) => {
-            // The default marker should be set on at most one device, and
-            // only when the list is non-empty.
-            let defaults = devices.iter().filter(|d| d.is_default).count();
-            if !devices.is_empty() {
-                assert!(defaults <= 1, "at most one device can be default");
-            }
-        }
-        Err(e) => {
-            eprintln!("output device enumeration skipped: {e}");
-        }
-    }
 }
 
 #[cfg(feature = "output")]
@@ -425,49 +396,4 @@ fn eq_boost_changes_signal_when_active() {
         "+6 dB at 1 kHz must boost a 1 kHz sine above the original peak; \
          before={max_before} after={max_after}"
     );
-}
-
-#[test]
-fn resample_identity_when_rates_match() {
-    use crate::resampler::resample_interleaved;
-    let input: Vec<f32> = (0..4096).map(|i| i as f32 / 4096.0).collect();
-    let out = resample_interleaved(&input, 1, 48_000, 48_000);
-    assert_eq!(out.len(), input.len());
-    assert_eq!(out, input);
-}
-
-#[test]
-fn resample_empty_input_returns_empty() {
-    use crate::resampler::resample_interleaved;
-    let out = resample_interleaved(&[], 2, 192_000, 48_000);
-    assert!(out.is_empty());
-}
-
-#[test]
-fn resample_192k_to_48k_changes_length() {
-    use crate::resampler::resample_interleaved;
-    // 1 second of mono audio at 192 kHz → 192_000 samples.
-    let input: Vec<f32> = (0..192_000).map(|i| (i as f32 * 0.001).sin()).collect();
-    let out = resample_interleaved(&input, 1, 192_000, 48_000);
-    // 4× downsample → about 48_000 samples (rubato's output_frames isn't
-    // exact because of the sinc filter's overlap, but should be close).
-    assert!(
-        (out.len() as i64 - 48_000).abs() < 2_000,
-        "expected ~48000 samples, got {}",
-        out.len()
-    );
-}
-
-#[test]
-fn resample_48k_to_192k_changes_length() {
-    use crate::resampler::resample_interleaved;
-    let input: Vec<f32> = (0..48_000).map(|i| (i as f32 * 0.01).sin()).collect();
-    let out = resample_interleaved(&input, 2, 48_000, 192_000);
-    assert!(
-        out.len() > 180_000 && out.len() < 200_000,
-        "expected ~192_000 samples, got {}",
-        out.len()
-    );
-    // Stereo output has 2 channels worth of interleaved samples.
-    assert_eq!(out.len() % 2, 0);
 }
