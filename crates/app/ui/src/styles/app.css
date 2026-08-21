@@ -95,7 +95,25 @@ main {
   background: rgba(0, 0, 0, 0.3);
   padding: 0 0.3em;
   border-radius: 3px;
-  font-family: ui-monospace, monospace;
+}
+
+.action-status {
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.action-status.err {
+  background: #4a2a2a;
+  border: 1px solid #663333;
+  color: #f0c0c0;
+}
+
+.action-status.ok {
+  background: #2a4a2a;
+  border: 1px solid #336633;
+  color: #c0f0c0;
 }
 
 .list {
