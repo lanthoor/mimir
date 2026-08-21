@@ -12,6 +12,10 @@ const state = {
   query: "",
   items: [],
   library: { path: null, last_error: null },
+  // Last user-action result (separate from library-open errors so a
+  // successful folder add doesn't get reported as "library not open").
+  // kind: null | "ok" | "err".
+  action: { kind: null, text: null },
   // album_id → data: URL string (or "" when no cover). Cached so the
   // WebView doesn't re-fetch on every render.
   covers: {},
@@ -31,6 +35,7 @@ const $addFolderPath = document.getElementById("add-folder-path");
 const $addFolderBrowse = document.getElementById("add-folder-browse");
 const $addFolderInfo = document.getElementById("add-folder-info");
 const $status = document.getElementById("status");
+const $actionStatus = document.getElementById("action-status");
 const $editDialog = document.getElementById("edit-track-dialog");
 const $editForm = document.getElementById("edit-track-form");
 
@@ -92,6 +97,19 @@ function renderStatus() {
   pathInfo.append(document.createTextNode("at "), document.createElement("code"));
   pathInfo.lastChild.textContent = path ?? "(unknown)";
   $status.append(msg, code, pathInfo);
+  renderAction();
+}
+
+function renderAction() {
+  const { kind, text } = state.action;
+  if (!kind || !text) {
+    $actionStatus.hidden = true;
+    $actionStatus.replaceChildren();
+    return;
+  }
+  $actionStatus.hidden = false;
+  $actionStatus.className = `action-status ${kind}`;
+  $actionStatus.textContent = text;
 }
 
 function renderCard(item) {
@@ -248,19 +266,26 @@ $addFolderDialog.addEventListener("close", async () => {
   if ($addFolderDialog.returnValue !== "default") return;
   const path = $addFolderPath.value.trim();
   if (!path) return;
+  state.action = { kind: null, text: null };
+  renderAction();
   try {
     const result = await invoke("library_add_folder", { path });
+    const s = result.summary || {};
     console.log(
       `library_add_folder: ${path} -> folder_id=${result.folder_id} ` +
-        `walked=${result.summary.walked} sent=${result.summary.sent} ` +
-        `known=${result.summary.known} hashed_fail=${result.summary.hashed_fail}`,
+        `walked=${s.walked} sent=${s.sent} known=${s.known} hashed_fail=${s.hashed_fail}`,
     );
+    state.action = {
+      kind: "ok",
+      text: `Added ${s.sent} new tracks from ${path} (skipped ${s.known} known, ${s.hashed_fail} unreadable).`,
+    };
+    renderAction();
     await refresh();
   } catch (e) {
     console.error("add_folder failed:", e);
     const msg = (e && (e.message ?? e?.toString())) || JSON.stringify(e);
-    state.library.last_error = `Add folder failed: ${msg}`;
-    renderStatus();
+    state.action = { kind: "err", text: `Add folder failed: ${msg}` };
+    renderAction();
   }
 });
 
