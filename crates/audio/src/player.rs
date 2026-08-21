@@ -1,10 +1,13 @@
-//! Audio player: drives a rodio playback queue from decoded PCM.
+//! Audio player: drives a rodio playback queue from a streaming decoder.
 //!
-//! Rodio handles the device open, the cpal callback, the ring buffer, and
-//! the sample-rate conversion between source and device. That deletes the
-//! previous cpal `OutputStream` trait + bulk rubato resample pass; the worker
-//! no longer blocks on resampling the whole decoded buffer before opening
-//! the output stream.
+//! Rodio handles the device open, the cpal callback, the ring buffer, the
+//! on-the-fly sample-rate conversion, *and* per-packet decode. The worker
+//! no longer pre-resamples the whole decoded buffer before opening the
+//! output stream, and no longer decodes the file into memory — opening a
+//! `BufReader<File>` and handing rodio a `Decoder` is enough; rodio pulls
+//! packets from the file as the audio thread needs them. First-play and
+//! post-stop/post-pause latency drop to a file open + format probe
+//! (milliseconds), not a full-file decode (tens of seconds on `HiRes` FLACs).
 //!
 //! Gated on the `output` feature — the production code path needs an
 //! audio backend. Tests use the `output` feature only when there's a device
@@ -16,18 +19,23 @@
 // the assignment site.
 #![cfg_attr(feature = "output", allow(unused_assignments, unused_variables))]
 
-use std::num::NonZeroU16;
-use std::num::NonZeroU32;
+use std::fs::File;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use rodio::buffer::SamplesBuffer;
 use rodio::Player as RodioPlayer;
+use rodio::Source;
 use thiserror::Error;
 
 use super::transport::TransportState;
 use mimir_telemetry as telemetry;
+
+/// Decoder type the worker hands to rodio. `Decoder<File>` via `TryFrom<File>`
+/// gives `Decoder<BufReader<File>>` with `byte_len` populated for accurate
+/// duration / seek support.
+type StreamingSource = rodio::Decoder<BufReader<File>>;
 
 #[derive(Debug, Error)]
 pub enum PlayerError {
@@ -47,10 +55,9 @@ pub enum PlayerCommand {
     Stop,
     Next,
     Previous,
-    /// Pre-decode the next track into a rodio source and queue it so the
-    /// player swaps to it the moment the current source ends. Idempotent:
-    /// a second `PrepareNext` before consumption replaces the pending
-    /// source.
+    /// Record the next track's path so the worker can open it the moment
+    /// the current source ends, for gapless handoff. A second `PrepareNext`
+    /// before consumption replaces the pending path.
     PrepareNext(PathBuf),
     /// Set the ReplayGain-style gain (in dB) applied to every subsequent
     /// playback via rodio's volume control. Pass `None` to disable gain
@@ -63,7 +70,7 @@ pub enum PlayerCommand {
 pub struct PlayerSnapshot {
     pub state: TransportState,
     pub current: Option<PathBuf>,
-    /// Path of the pre-decoded "next" track, if any.
+    /// Path of the prepared "next" track, if any.
     pub next_prepared: Option<PathBuf>,
 }
 
@@ -143,7 +150,10 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
     let mut rodio_sink: Option<rodio::MixerDeviceSink> = None;
     let mut rodio_player: Option<RodioPlayer> = None;
     let mut gain_db: Option<f64> = None;
-    let mut pending_next: Option<(PathBuf, SamplesBuffer)> = None;
+    // Path of the track prepared for gapless handoff. Decoder<File> is not
+    // Clone, so we re-open the file when the worker actually needs the
+    // source. Stash the path, not the decoder.
+    let mut pending_next: Option<PathBuf> = None;
     let mut cmd_n = 0u64;
 
     while let Ok(cmd) = rx.recv() {
@@ -161,35 +171,35 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                 }
                 telemetry::log("INFO", "audio.player", &format!("gain set to {g:?}"));
             }
-            PlayerCommand::PrepareNext(path) => match decode_to_rodio_source(&path) {
-                Ok(source) => {
-                    pending_next = Some((path.clone(), source));
-                    if let Some(p) = rodio_player.as_ref() {
-                        if let Some((_, src)) = pending_next.as_ref() {
-                            p.append(src.clone());
-                        }
+            PlayerCommand::PrepareNext(path) => {
+                pending_next = Some(path.clone());
+                // Fast-lane: if a player is already up, open the file now
+                // and queue the source so playback is gapless.
+                if let Some(p) = rodio_player.as_ref() {
+                    match open_streaming_source(&path) {
+                        Ok(src) => p.append(src),
+                        Err(e) => telemetry::log(
+                            "ERROR",
+                            "audio.player",
+                            &format!("prepare_next open failed path={} err={e}", path.display()),
+                        ),
                     }
-                    let mut snapshot = shared.lock().expect("player poisoned");
-                    snapshot.next_prepared = Some(path.clone());
-                    telemetry::log(
-                        "INFO",
-                        "audio.player",
-                        &format!("prepare_next ok path={}", path.display()),
-                    );
                 }
-                Err(e) => telemetry::log(
-                    "ERROR",
+                let mut snapshot = shared.lock().expect("player poisoned");
+                snapshot.next_prepared = Some(path.clone());
+                telemetry::log(
+                    "INFO",
                     "audio.player",
-                    &format!("prepare_next decode failed path={} err={e}", path.display()),
-                ),
-            },
+                    &format!("prepare_next ok path={}", path.display()),
+                );
+            }
             PlayerCommand::Play(path) => {
                 telemetry::log(
                     "INFO",
                     "audio.player",
                     &format!("Play start path={} gain_db={gain_db:?}", path.display()),
                 );
-                match decode_to_rodio_source(&path) {
+                match open_streaming_source(&path) {
                     Ok(source) => {
                         let pending = pending_next.take();
                         match rodio_player.as_mut() {
@@ -197,15 +207,35 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                                 p.stop();
                                 p.set_volume(replay_gain_to_volume(gain_db));
                                 p.append(source);
-                                if let Some((_, src)) = pending.as_ref() {
-                                    p.append(src.clone());
+                                if let Some(next_path) = pending.as_ref() {
+                                    match open_streaming_source(next_path) {
+                                        Ok(next_src) => p.append(next_src),
+                                        Err(e) => telemetry::log(
+                                            "ERROR",
+                                            "audio.player",
+                                            &format!(
+                                                "Play: pending-next open failed path={} err={e}",
+                                                next_path.display()
+                                            ),
+                                        ),
+                                    }
                                 }
                                 p.play();
                             }
                             None => match open_first_player(source, gain_db) {
                                 Ok((sink, p)) => {
-                                    if let Some((_, src)) = pending.as_ref() {
-                                        p.append(src.clone());
+                                    if let Some(next_path) = pending.as_ref() {
+                                        match open_streaming_source(next_path) {
+                                            Ok(next_src) => p.append(next_src),
+                                            Err(e) => telemetry::log(
+                                                "ERROR",
+                                                "audio.player",
+                                                &format!(
+                                                    "Play: pending-next open failed path={} err={e}",
+                                                    next_path.display()
+                                                ),
+                                            ),
+                                        }
                                     }
                                     rodio_sink = Some(sink);
                                     rodio_player = Some(p);
@@ -242,7 +272,7 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
                         telemetry::log(
                             "ERROR",
                             "audio.player",
-                            &format!("Play decode failed path={} err={e}", path.display()),
+                            &format!("Play open failed path={} err={e}", path.display()),
                         );
                         let mut snapshot = shared.lock().expect("player poisoned");
                         snapshot.current = Some(path);
@@ -298,33 +328,24 @@ fn worker_loop(rx: Receiver<PlayerCommand>, shared: Arc<Mutex<PlayerSnapshot>>) 
     );
 }
 
-/// Decode `path` into a rodio `SamplesBuffer` ready for `Player::append`.
-fn decode_to_rodio_source(path: &Path) -> Result<SamplesBuffer, PlayerError> {
+/// Open `path` and return a rodio `Decoder` ready for `Player::append`.
+/// Rodio pulls packets from the file on demand — no whole-file decode.
+fn open_streaming_source(path: &Path) -> Result<StreamingSource, PlayerError> {
     let t_start = std::time::Instant::now();
-    telemetry::log(
-        "DEBUG",
-        "audio.player",
-        &format!("decode_to_rodio_source start path={}", path.display()),
-    );
-    let audio = super::decode::decode_file(path).map_err(|e| PlayerError::Decode(e.to_string()))?;
-    let t_decode = t_start.elapsed();
+    let file = File::open(path).map_err(|e| PlayerError::Decode(e.to_string()))?;
+    let source = StreamingSource::try_from(file).map_err(|e| PlayerError::Decode(e.to_string()))?;
     telemetry::log(
         "INFO",
         "audio.player",
         &format!(
-            "decode ok path={} samples={} channels={} rate={} took={:?}",
+            "open_streaming_source ok path={} ch={} rate={} took={:?}",
             path.display(),
-            audio.samples.len(),
-            audio.channels,
-            audio.sample_rate,
-            t_decode
+            source.channels().get(),
+            source.sample_rate().get(),
+            t_start.elapsed()
         ),
     );
-    let channels = NonZeroU16::new(audio.channels)
-        .ok_or_else(|| PlayerError::Decode("zero channels".into()))?;
-    let sample_rate = NonZeroU32::new(audio.sample_rate)
-        .ok_or_else(|| PlayerError::Decode("zero sample rate".into()))?;
-    Ok(SamplesBuffer::new(channels, sample_rate, audio.samples))
+    Ok(source)
 }
 
 /// Open the first rodio `Player` for a fresh playback session. Returns
@@ -332,7 +353,7 @@ fn decode_to_rodio_source(path: &Path) -> Result<SamplesBuffer, PlayerError> {
 /// kept alive alongside the `Player` for playback to continue.
 #[cfg(feature = "output")]
 fn open_first_player(
-    source: SamplesBuffer,
+    source: StreamingSource,
     gain_db: Option<f64>,
 ) -> Result<(rodio::MixerDeviceSink, RodioPlayer), PlayerError> {
     let sink = rodio::DeviceSinkBuilder::open_default_sink()
@@ -346,7 +367,7 @@ fn open_first_player(
 
 #[cfg(not(feature = "output"))]
 fn open_first_player(
-    _source: SamplesBuffer,
+    _source: StreamingSource,
     _gain_db: Option<f64>,
 ) -> Result<(rodio::MixerDeviceSink, RodioPlayer), PlayerError> {
     Err(PlayerError::Output(
