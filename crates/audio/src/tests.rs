@@ -185,6 +185,16 @@ fn player_new_starts_in_stopped_state() {
 }
 
 #[cfg(feature = "output")]
+fn audio_device_available() -> bool {
+    // ponytail: probe the same rodio entry point the player uses. CI may
+    // run without `/dev/snd` or with a null ALSA device that has no
+    // config — those environments can't exercise the playback path, so
+    // dependent tests return early instead of failing on environment, not
+    // on the code under test.
+    rodio::DeviceSinkBuilder::open_default_sink().is_ok()
+}
+
+#[cfg(feature = "output")]
 fn write_tiny_wav(path: &Path, samples: u32) {
     use std::io::Write;
     let mut data = Vec::with_capacity(44 + (samples as usize) * 2);
@@ -213,6 +223,9 @@ fn write_tiny_wav(path: &Path, samples: u32) {
 #[cfg(feature = "output")]
 #[test]
 fn player_play_command_transitions_to_playing() {
+    if !audio_device_available() {
+        return;
+    }
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("sine.wav");
     write_tiny_wav(&path, 200);
@@ -238,6 +251,9 @@ fn player_play_command_transitions_to_playing() {
 #[cfg(feature = "output")]
 #[test]
 fn player_pause_resume_stop_round_trip() {
+    if !audio_device_available() {
+        return;
+    }
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("sine.wav");
     write_tiny_wav(&path, 200);
