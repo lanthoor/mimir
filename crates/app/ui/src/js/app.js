@@ -378,7 +378,14 @@ $editDialog.addEventListener("close", async () => {
   }
 });
 
-$play.addEventListener("click", () => invoke("audio_play", { trackId: 0 }).catch(console.error));
+$play.addEventListener("click", () => {
+  // The toolbar play button restarts the most recently double-clicked
+  // track. Sending `trackId: 0` was a no-op (track_id=0 doesn't exist in
+  // the library) — the toolbar now does nothing until a track is chosen.
+  if (state.nowPlayingTrackId != null) {
+    invoke("audio_play", { trackId: state.nowPlayingTrackId }).catch(console.error);
+  }
+});
 $pause.addEventListener("click", () => invoke("audio_pause").catch(console.error));
 $stop.addEventListener("click", () => invoke("audio_stop").catch(console.error));
 $next.addEventListener("click", () => invoke("audio_next").catch(console.error));

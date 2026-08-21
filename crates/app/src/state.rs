@@ -564,6 +564,20 @@ impl AppState {
         inner.transport.dispatch(cmd);
     }
 
+    /// Send a command to the live audio `Player` worker. No-op when the
+    /// `output` feature is off or when no player has been instantiated
+    /// yet (the player is lazily created on the first `play_track`).
+    #[cfg(feature = "output")]
+    pub fn send_player(&self, cmd: mimir_audio::PlayerCommand) {
+        telemetry::log("DEBUG", "app", &format!("send_player {cmd:?}"));
+        let inner = self.inner.lock().expect("state poisoned");
+        if let Some(p) = inner.player.as_ref() {
+            if let Err(e) = p.handle().send(cmd) {
+                telemetry::log("WARN", "app", &format!("send_player: worker gone: {e}"));
+            }
+        }
+    }
+
     /// Look up the track's path in the library and start playback.
     ///
     /// Drives both the (legacy) transport state machine and the real

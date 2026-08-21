@@ -42,6 +42,7 @@ pub fn run() {
             command::audio_stop,
             command::audio_next,
             command::audio_previous,
+            command::audio_player_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("mimir app failed to start");
