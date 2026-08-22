@@ -960,6 +960,7 @@ fn default_library_path() -> PathBuf {
     dir.join("library.sqlite")
 }
 
+#[cfg(feature = "tauri")]
 fn count_files(node: &mimir_core::query::FolderNode) -> i64 {
     let mut n: i64 = node.files.len().try_into().expect("file count fits in i64");
     for c in &node.children {
