@@ -25,6 +25,12 @@ pub fn run() {
             command::library_status,
             command::library_add_folder,
             command::library_add_folders,
+            command::library_remove_folder,
+            command::library_rename_folder,
+            command::library_rename_subdir,
+            command::library_reveal_in_file_manager,
+            command::library_list_folders,
+            command::library_folder_tree,
             command::library_search,
             command::library_list_albums,
             command::library_list_genres,
@@ -43,6 +49,8 @@ pub fn run() {
             command::audio_next,
             command::audio_previous,
             command::audio_player_snapshot,
+            command::app_log,
+            command::library_dump_track_paths,
         ])
         .run(tauri::generate_context!())
         .expect("mimir app failed to start");

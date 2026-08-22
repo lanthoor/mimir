@@ -327,6 +327,251 @@ impl AppState {
         Ok(out)
     }
 
+    /// Folders-view backing list (one row per watched root).
+    #[cfg(feature = "tauri")]
+    pub fn list_folders(&self) -> Result<Vec<crate::command::FolderRow>, AppError> {
+        telemetry::log("DEBUG", "app", "list_folders request");
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_folders(&conn)?;
+        let rows: Vec<crate::command::FolderRow> = out
+            .root_children
+            .into_iter()
+            .filter_map(|n| {
+                let id = n.folder_id?;
+                Some(crate::command::FolderRow {
+                    file_count: count_files(&n),
+                    path: n.path,
+                    id,
+                })
+            })
+            .collect();
+        telemetry::log("INFO", "app", &format!("list_folders ok n={}", rows.len()));
+        Ok(rows)
+    }
+
+    /// Full folder tree for the Folders view (icon + tree shapes).
+    #[cfg(feature = "tauri")]
+    pub fn folder_tree(&self) -> Result<mimir_core::query::FolderView, AppError> {
+        telemetry::log("DEBUG", "app", "folder_tree request");
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_folders(&conn)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "folder_tree ok flat={} roots={}",
+                out.flat.len(),
+                out.root_children.len()
+            ),
+        );
+        Ok(out)
+    }
+
+    /// Mark a watched folder inactive. Returns an `Internal` error if
+    /// the id is unknown; otherwise this is silent because the Folders
+    /// view re-fetches.
+    #[cfg(feature = "tauri")]
+    pub fn remove_folder(&self, folder_id: i64) -> Result<(), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("remove_folder folder_id={folder_id}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let changed = conn.execute(
+            "UPDATE folder SET active = 0 WHERE id = ?1 AND active = 1",
+            [folder_id],
+        )?;
+        if changed == 0 {
+            telemetry::log(
+                "WARN",
+                "app",
+                &format!("remove_folder: no active row folder_id={folder_id}"),
+            );
+            return Err(AppError::Internal(format!(
+                "folder {folder_id} not found or already removed"
+            )));
+        }
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("remove_folder ok folder_id={folder_id}"),
+        );
+        Ok(())
+    }
+
+    /// Rename a watched folder's on-disk path. Updates `folder.path` and
+    /// rewrites every `track.path` that pointed at the old prefix so the
+    /// Folders view + playback track the live FS location. Tracks whose
+    /// path doesn't start with the old prefix are left alone (the user
+    /// may have already moved them to another root).
+    #[cfg(feature = "tauri")]
+    pub fn rename_folder(&self, folder_id: i64, new_path: &str) -> Result<(), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("rename_folder folder_id={folder_id} new_path={new_path}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+
+        // Look up the existing path; need it to rewrite matching tracks.
+        let old_path: String = conn
+            .query_row(
+                "SELECT path FROM folder WHERE id = ?1",
+                [folder_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| AppError::Internal(format!("folder {folder_id} not found")))?;
+
+        if old_path == new_path {
+            telemetry::log("DEBUG", "app", "rename_folder: no-op (same path)");
+            return Ok(());
+        }
+
+        // Update the folder row + any tracks underneath it.
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE folder SET path = ?1 WHERE id = ?2",
+            rusqlite::params![new_path, folder_id],
+        )?;
+        let suffix = format!("{old_path}/");
+        // Rewrite track paths whose stored string still has the old
+        // prefix. `path LIKE 'old/%'` covers the recursive subdir case;
+        // the `substr(1 + len)` swaps the prefix in place.
+        let rewritten = tx.execute(
+            "UPDATE track SET path = ?1 || substr(path, ?2) \
+             WHERE path LIKE ?3 ESCAPE '\\'",
+            rusqlite::params![
+                new_path,
+                i64::try_from(suffix.len()).expect("path fits"),
+                format!("{}{}", escape_like_folder(&suffix), "%"),
+            ],
+        )?;
+        tx.commit()?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("rename_folder ok folder_id={folder_id} tracks_rewritten={rewritten}"),
+        );
+        Ok(())
+    }
+
+    /// Rename a subdirectory under a watched root. The new name is a
+    /// single path segment (no separators) — the backend derives the
+    /// full new path from the parent of the current path + the new name.
+    /// Actually renames the directory on disk and rewrites every
+    /// `track.path` underneath it.
+    #[cfg(feature = "tauri")]
+    pub fn rename_subdir(&self, current_path: &str, new_name: &str) -> Result<(), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("rename_subdir current={current_path} new_name={new_name}"),
+        );
+
+        // Validate the new name: a single segment, no separators.
+        if new_name.is_empty()
+            || new_name.contains('/')
+            || new_name.contains('\\')
+            || new_name.contains('\0')
+        {
+            return Err(AppError::Internal(
+                "new name must be a single path segment".into(),
+            ));
+        }
+
+        let current = std::path::Path::new(current_path);
+        let parent = current
+            .parent()
+            .ok_or_else(|| AppError::Internal("cannot rename a root path".into()))?;
+        let new_path = parent.join(new_name);
+
+        if new_path.exists() {
+            return Err(AppError::Internal(format!(
+                "target already exists: {}",
+                new_path.display()
+            )));
+        }
+
+        // Rename on disk.
+        std::fs::rename(current, &new_path).map_err(|e| {
+            telemetry::log(
+                "ERROR",
+                "app",
+                &format!("rename_subdir fs rename failed: {e}"),
+            );
+            AppError::Io(e.to_string())
+        })?;
+
+        // Rewrite track paths in the DB.
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let suffix = format!("{current_path}/");
+        let new_path_str = new_path.to_string_lossy().into_owned();
+        let rewritten = conn.execute(
+            "UPDATE track SET path = ?1 || substr(path, ?2) \
+             WHERE path LIKE ?3 ESCAPE '\\'",
+            rusqlite::params![
+                &new_path_str,
+                i64::try_from(suffix.len()).expect("path fits"),
+                format!("{}{}", escape_like_folder(&suffix), "%"),
+            ],
+        )?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("rename_subdir ok new_path={new_path_str} tracks_rewritten={rewritten}"),
+        );
+        Ok(())
+    }
+
+    /// Reveal a file (or directory) in the platform's file manager.
+    /// Linux: `xdg-open <parent_dir>`. macOS: `open -R <path>`.
+    /// Windows: `explorer /select,<path>`.
+    #[cfg(feature = "tauri")]
+    pub fn reveal_in_file_manager(&self, path: &str) -> Result<(), AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("reveal_in_file_manager path={path}"),
+        );
+        let p = std::path::Path::new(path);
+        #[cfg(target_os = "linux")]
+        {
+            let dir = if p.is_dir() {
+                p.to_path_buf()
+            } else {
+                p.parent()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_default()
+            };
+            std::process::Command::new("xdg-open")
+                .arg(&dir)
+                .status()
+                .map_err(|e| AppError::Io(e.to_string()))?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(p)
+                .status()
+                .map_err(|e| AppError::Io(e.to_string()))?;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("explorer")
+                .arg(format!("/select,{}", p.display()))
+                .status()
+                .map_err(|e| AppError::Io(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Return the cover art attached to `album_id`, if any. The cover is
     /// returned as `(mime_type, bytes)` so the front-end can render it
     /// directly via a `data:` URL or `Blob`.
@@ -713,4 +958,30 @@ fn default_library_path() -> PathBuf {
     let dir = base.join("mimir");
     let _ = std::fs::create_dir_all(&dir);
     dir.join("library.sqlite")
+}
+
+#[cfg(feature = "tauri")]
+fn count_files(node: &mimir_core::query::FolderNode) -> i64 {
+    let mut n: i64 = node.files.len().try_into().expect("file count fits in i64");
+    for c in &node.children {
+        n += count_files(c);
+    }
+    n
+}
+
+/// LIKE-escape user input: backslash, `%`, `_` get prefixed with `\`
+/// so `WHERE path LIKE '<input>%'` only matches the actual prefix.
+#[cfg(feature = "tauri")]
+fn escape_like_folder(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }

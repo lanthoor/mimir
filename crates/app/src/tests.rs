@@ -341,3 +341,98 @@ fn track_lyrics_returns_seeded_payload() {
     assert_eq!(row.text, "all you need is love");
     assert_eq!(row.source, "embedded");
 }
+
+#[cfg(feature = "tauri")]
+#[test]
+fn remove_folder_marks_inactive_and_rejects_unknown_id() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let music = dir.path().join("music");
+    std::fs::create_dir_all(&music).expect("mkdir");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let (id, _) = state.add_folder(&music).expect("add folder");
+
+    state.remove_folder(id).expect("remove");
+
+    let conn = state.library().expect("lib").conn().expect("conn");
+    let active: i64 = conn
+        .query_row("SELECT active FROM folder WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .expect("active");
+    assert_eq!(active, 0, "remove_folder must mark the row inactive");
+
+    let err = state.remove_folder(id).expect_err("removing twice errors");
+    assert!(
+        matches!(err, AppError::Internal(_)),
+        "expected Internal error, got {err:?}"
+    );
+
+    // Unknown id: error.
+    let err = state.remove_folder(99_999).expect_err("unknown id errors");
+    assert!(matches!(err, AppError::Internal(_)));
+}
+
+#[cfg(feature = "tauri")]
+#[test]
+fn rename_folder_updates_folder_and_tracks_under_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("db.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+
+    // Seed a folder + a track underneath it (using the old path).
+    conn.execute(
+        "INSERT INTO folder (path, path_hash, active) VALUES ('/music/old', RANDOMBLOB(16), 1)",
+        [],
+    )
+    .expect("folder");
+    let folder_id: i64 = conn
+        .query_row("SELECT last_insert_rowid()", [], |r| r.get(0))
+        .expect("id");
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, folder_id) \
+         VALUES ('/music/old/A/song.mp3', RANDOMBLOB(16), 0, 0, 'mp3', ?1)",
+        [folder_id],
+    )
+    .expect("track");
+    // Sibling track outside the folder must NOT be rewritten.
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec) \
+         VALUES ('/other/keep.mp3', RANDOMBLOB(16), 0, 0, 'mp3')",
+        [],
+    )
+    .expect("other");
+
+    state
+        .rename_folder(folder_id, "/music/new")
+        .expect("rename");
+
+    let folder_path: String = conn
+        .query_row("SELECT path FROM folder WHERE id = ?1", [folder_id], |r| {
+            r.get(0)
+        })
+        .expect("folder path");
+    assert_eq!(folder_path, "/music/new");
+
+    let track_path: String = conn
+        .query_row(
+            "SELECT path FROM track WHERE path = '/music/new/A/song.mp3'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("track rewritten");
+    assert_eq!(track_path, "/music/new/A/song.mp3");
+
+    // Sibling track stayed put.
+    let other_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM track WHERE path = '/other/keep.mp3'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("other lookup");
+    assert_eq!(other_count, 1, "outside-tracks must not be rewritten");
+}
