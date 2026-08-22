@@ -6,7 +6,9 @@ use std::path::Path;
 #[cfg(feature = "tauri")]
 use mimir_audio::TransportCommand;
 #[cfg(feature = "tauri")]
-use mimir_core::query::{AlbumRow, GenreRow, TrackRow, YearRow};
+use mimir_core::query::{AlbumRow, FolderView, GenreRow, TrackRow, YearRow};
+#[cfg(feature = "tauri")]
+use mimir_core::rusqlite;
 
 #[cfg(feature = "tauri")]
 use crate::error::AppError;
@@ -29,6 +31,85 @@ pub fn library_open(state: tauri::State<'_, AppState>, path: String) -> Result<(
 #[tauri::command]
 pub fn library_status(state: tauri::State<'_, AppState>) -> LibraryStatus {
     state.library_status()
+}
+
+/// Folders view payload. `path` is the watched root's absolute path;
+/// the front-end uses it to render the row + to confirm a remove dialog.
+/// `file_count` is the number of indexed audio files in this directory
+/// subtree (recursive) — purely informational for the row list.
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FolderRow {
+    pub id: i64,
+    pub path: String,
+    pub file_count: i64,
+}
+
+/// Returns every active watched folder with its rolled-up track count.
+/// Used by the Folders view to render the row list before the
+/// per-directory tree is requested.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_folders(state: tauri::State<'_, AppState>) -> Result<Vec<FolderRow>, AppError> {
+    state.list_folders()
+}
+
+/// Folder tree (icon-mode flat list + tree-mode hierarchy). Empty
+/// folders are pruned by the query layer.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_folder_tree(state: tauri::State<'_, AppState>) -> Result<FolderView, AppError> {
+    state.folder_tree()
+}
+
+/// Stop watching a folder. Soft-delete: the row is kept so future
+/// rescans / re-adds work, but it disappears from the Folders view.
+/// Indexed tracks are left in place so the user's Tracks / Albums /
+/// Artists views remain intact.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_remove_folder(
+    state: tauri::State<'_, AppState>,
+    folder_id: i64,
+) -> Result<(), AppError> {
+    state.remove_folder(folder_id)
+}
+
+/// Update the filesystem path of a watched folder. Used when the user
+/// renamed the directory on disk between runs — keeps the `path` column
+/// in sync so the Folders view shows the new label and future queries
+/// match the live FS state.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_rename_folder(
+    state: tauri::State<'_, AppState>,
+    folder_id: i64,
+    new_path: String,
+) -> Result<(), AppError> {
+    state.rename_folder(folder_id, &new_path)
+}
+
+/// Rename a subdirectory on disk + rewrite `track.path` rows under it.
+/// `current_path` is the full current path; `new_name` is a single path
+/// segment (no separators).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_rename_subdir(
+    state: tauri::State<'_, AppState>,
+    current_path: String,
+    new_name: String,
+) -> Result<(), AppError> {
+    state.rename_subdir(&current_path, &new_name)
+}
+
+/// Reveal a file or directory in the platform's file manager.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_reveal_in_file_manager(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<(), AppError> {
+    state.reveal_in_file_manager(&path)
 }
 
 /// Enqueue a folder for scanning. Returns the folder row id plus a
@@ -385,4 +466,32 @@ impl From<mimir_audio::PlayerSnapshot> for PlayerSnapshotOut {
             next_prepared: s.next_prepared.as_ref().map(|p| p.display().to_string()),
         }
     }
+}
+
+/// Diagnostic: dump sample paths from the DB for a given prefix. Used to
+/// debug path-normalisation bugs (trailing slash, NFC vs NFD, etc.).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_dump_track_paths(
+    state: tauri::State<'_, AppState>,
+    like_prefix: String,
+) -> Result<Vec<(String, i64)>, AppError> {
+    let lib = state.library()?;
+    let conn = lib.conn()?;
+    let mut stmt =
+        conn.prepare("SELECT path, id FROM track WHERE path LIKE ?1 ESCAPE '\\' LIMIT 10")?;
+    let rows = stmt.query_map(rusqlite::params![format!("{like_prefix}%")], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    let out = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(out)
+}
+
+/// Front-end log bridge. The webview can't reach the file-backed logger
+/// directly, so JS bubbles its `console.*` calls through here. Levels
+/// are freeform strings (`DEBUG`/`INFO`/`WARN`/`ERROR`).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn app_log(level: String, target: String, message: String) {
+    mimir_telemetry::log(&level, &target, &message);
 }

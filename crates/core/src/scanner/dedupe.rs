@@ -127,10 +127,24 @@ pub fn scan_root(
 
         if is_known(conn, &file_hash)? {
             known += 1;
+            // The (content, mtime, size) triple matches a known track —
+            // but the filesystem path may have changed (rename or move
+            // since the last scan). Refresh `track.path` so the Folders
+            // view + playback point at the live location.
+            conn.execute(
+                "UPDATE track SET path = ?1 \
+                 WHERE path_hash = ?2 AND mtime_ns = ?3 AND size_bytes = ?4",
+                rusqlite::params![
+                    path.to_string_lossy().into_owned(),
+                    &file_hash.path_hash[..],
+                    file_hash.mtime_ns,
+                    file_hash.size_bytes,
+                ],
+            )?;
             telemetry::log(
                 "DEBUG",
                 "scanner",
-                &format!("dedupe hit path={}", path.display()),
+                &format!("path refreshed for {}", path.display()),
             );
             continue;
         }

@@ -427,3 +427,107 @@ fn list_tracks_filtered_pagination() {
     let ids: std::collections::HashSet<_> = p1.iter().chain(p2.iter()).map(|t| t.id).collect();
     assert_eq!(ids.len(), 3);
 }
+
+fn touch_dir_chain(root: &std::path::Path, segments: &[&str]) -> std::path::PathBuf {
+    let p = segments
+        .iter()
+        .fold(root.to_path_buf(), |acc, s| acc.join(s));
+    std::fs::create_dir_all(&p).expect("mkdir");
+    p
+}
+
+#[test]
+fn list_folders_includes_every_dir_and_only_audio_files() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+
+    // Root has: a track under `pop`, a cover.jpg we must ignore, and
+    // an empty `notes/` subdir that must still appear.
+    let pop = touch_dir_chain(root, &["music", "pop"]);
+    let mp3 = pop.join("hit.mp3");
+    std::fs::write(&mp3, b"x").expect("write");
+    std::fs::write(pop.join("cover.jpg"), b"\xff").expect("jpg");
+    touch_dir_chain(root, &["music", "notes"]);
+    // An unreadable / non-audio sibling under pop — must not appear.
+    std::fs::write(pop.join("notes.txt"), b"hi").expect("notes");
+
+    // Index the .mp3 with a real title so the row resolves. Only the
+    // /music root is a watched root so pop/ shows up as a child, not
+    // as its own root entry.
+    let root_folder = crate::scanner::upsert_folder(&conn, touch_dir_chain(root, &["music"]))
+        .expect("root folder");
+    conn.execute(
+        "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, folder_id) \
+         VALUES (?1, RANDOMBLOB(16), 0, 0, 'mp3', 'Hit', ?2)",
+        rusqlite::params![mp3.to_string_lossy(), root_folder],
+    )
+    .expect("track");
+
+    let view = crate::query::list_folders(&conn).expect("folders");
+    assert_eq!(view.root_children.len(), 1, "music/ root must appear");
+    let music_node = &view.root_children[0];
+
+    // Every directory shows up, including the empty `notes/` one.
+    let child_names: std::collections::HashSet<_> = music_node
+        .children
+        .iter()
+        .filter_map(|n| n.name.clone())
+        .collect();
+    assert!(child_names.contains("pop"));
+    assert!(child_names.contains("notes"), "empty dir must appear");
+
+    // pop/ contains the .mp3 (with title) and skips the .jpg + .txt.
+    let pop_node = music_node
+        .children
+        .iter()
+        .find(|n| n.name.as_deref() == Some("pop"))
+        .expect("pop node");
+    assert_eq!(pop_node.files.len(), 1, "only the .mp3 should be listed");
+    let f = &pop_node.files[0];
+    assert!(f.path.ends_with("hit.mp3"));
+    assert_eq!(f.title.as_deref(), Some("Hit"));
+    assert!(f.track_id.is_some());
+
+    // notes/ is present and has no files.
+    let notes_node = music_node
+        .children
+        .iter()
+        .find(|n| n.name.as_deref() == Some("notes"))
+        .expect("notes node");
+    assert!(notes_node.files.is_empty());
+
+    // Icon (flat) mode lists every directory (roots included now).
+    assert!(view
+        .flat
+        .iter()
+        .any(|n| n.path == mp3.parent().unwrap().to_string_lossy()));
+    assert!(view
+        .flat
+        .iter()
+        .any(|n| n.path == touch_dir_chain(root, &["music", "notes"]).to_string_lossy()));
+}
+
+#[test]
+fn list_folders_skips_inactive_roots() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let music = touch_dir_chain(root, &["music"]);
+    let track = music.join("t.mp3");
+    std::fs::write(&track, b"x").expect("write");
+    crate::scanner::upsert_folder(&conn, track.parent().unwrap()).expect("track folder");
+
+    let id = crate::scanner::upsert_folder(&conn, &music).expect("upsert");
+    conn.execute("UPDATE folder SET active = 0 WHERE id = ?1", [id])
+        .expect("deactivate");
+
+    let view = crate::query::list_folders(&conn).expect("folders");
+    assert!(
+        view.root_children.is_empty(),
+        "inactive roots must not surface"
+    );
+    assert!(view.flat.is_empty());
+}

@@ -147,3 +147,25 @@ fn scan_root_emits_jobs_for_new_files_and_skips_known() {
     assert_eq!(jobs.len(), 1, "expected 1 new job, got {jobs:?}");
     assert_eq!(jobs[0].path, new_file);
 }
+
+#[test]
+fn upsert_folder_revives_soft_deleted_rows() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    let id1 = upsert_folder(&conn, "/music/a").expect("first");
+    // Soft-delete.
+    conn.execute("UPDATE folder SET active = 0 WHERE id = ?1", [id1])
+        .expect("deactivate");
+
+    // Re-add must reuse the same row id and flip active back.
+    let id2 = upsert_folder(&conn, "/music/a").expect("revive");
+    assert_eq!(id1, id2, "re-add must reuse the existing row");
+
+    let active: i64 = conn
+        .query_row("SELECT active FROM folder WHERE id = ?1", [id1], |row| {
+            row.get(0)
+        })
+        .expect("active");
+    assert_eq!(active, 1, "revive must flip active back to 1");
+}

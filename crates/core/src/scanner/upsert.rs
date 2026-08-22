@@ -8,24 +8,36 @@ use rusqlite::{Connection, OptionalExtension};
 
 /// Persist a folder row keyed by a blake3 hash of its canonical path.
 /// Returns the row id; repeated calls with the same path return the same id.
+///
+/// A re-add of a previously soft-deleted folder flips `active` back to
+/// `1` so the Folders view shows it again without a row duplication.
 pub fn upsert_folder(conn: &Connection, path: impl AsRef<Path>) -> rusqlite::Result<i64> {
     let path_str = path.as_ref().to_string_lossy().into_owned();
     let path_hash = folder_hash(&path_str);
 
-    // Fast path: already present.
-    if let Some(id) = conn
+    // Fast path: already present. If the row was soft-deleted, revive it.
+    if let Some((id, active)) = conn
         .query_row(
-            "SELECT id FROM folder WHERE path = ?1",
+            "SELECT id, active FROM folder WHERE path = ?1",
             [&path_str],
-            |row| row.get::<_, i64>(0),
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
         )
         .optional()?
     {
-        telemetry::log(
-            "DEBUG",
-            "scanner",
-            &format!("upsert_folder hit id={id} path={path_str}"),
-        );
+        if active == 0 {
+            conn.execute("UPDATE folder SET active = 1 WHERE id = ?1", [id])?;
+            telemetry::log(
+                "INFO",
+                "scanner",
+                &format!("upsert_folder revive id={id} path={path_str}"),
+            );
+        } else {
+            telemetry::log(
+                "DEBUG",
+                "scanner",
+                &format!("upsert_folder hit id={id} path={path_str}"),
+            );
+        }
         return Ok(id);
     }
 
