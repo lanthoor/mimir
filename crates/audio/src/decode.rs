@@ -6,12 +6,12 @@
 use std::path::Path;
 
 use mimir_telemetry as telemetry;
-use symphonia::core::audio::{AudioBuffer, AudioBufferRef};
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::audio::Channels;
+use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymError;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
-use symphonia::core::probe::Hint;
 use thiserror::Error;
 
 /// Interleaved f32 PCM samples.
@@ -43,7 +43,7 @@ const fn unsupported(err: &SymError) -> bool {
 
 /// Decode the audio file at `path` to interleaved f32 PCM.
 ///
-/// Decodes the *first* audio track in the container to completion. For Tier
+/// Decodes the *default audio track* in the container to completion. For Tier
 /// 0's single-track-per-file assumption this is sufficient.
 #[allow(clippy::too_many_lines)]
 pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
@@ -55,12 +55,12 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
     let file = std::fs::File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
 
-    let probed = symphonia::default::get_probe()
-        .format(
+    let mut format = symphonia::default::get_probe()
+        .probe(
             &Hint::new(),
             mss,
-            &FormatOptions::default(),
-            &symphonia::core::meta::MetadataOptions::default(),
+            FormatOptions::default(),
+            symphonia::core::meta::MetadataOptions::default(),
         )
         .map_err(|e| {
             telemetry::log(
@@ -75,27 +75,34 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
             }
         })?;
 
-    let mut format = probed.format;
+    let track = format.default_track(TrackType::Audio).ok_or_else(|| {
+        telemetry::log(
+            "WARN",
+            "audio.decode",
+            &format!("no audio tracks in {}", path.display()),
+        );
+        DecodeError::NoTracks
+    })?;
 
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+    // symphonia 0.6: `track.codec_params` is now `Option<CodecParameters>`,
+    // `default_track(TrackType::Audio)` guarantees an audio codec, so this
+    // extraction is the "no audio track" case rather than a codec mismatch.
+    let audio = track
+        .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
         .ok_or_else(|| {
             telemetry::log(
                 "WARN",
                 "audio.decode",
-                &format!("no audio tracks in {}", path.display()),
+                &format!("no audio codec params in {}", path.display()),
             );
             DecodeError::NoTracks
         })?;
 
     let track_id = track.id;
-    let sample_rate = track.codec_params.sample_rate.unwrap_or(44_100);
-    let channel_count = track
-        .codec_params
-        .channels
-        .map_or(2, symphonia::core::audio::Channels::count);
+    let sample_rate = audio.sample_rate.unwrap_or(44_100);
+    let channel_count = audio.channels.as_ref().map_or(2, Channels::count);
     let channels =
         u16::try_from(channel_count).map_err(|_| DecodeError::TooManyChannels(channel_count))?;
     telemetry::log(
@@ -105,7 +112,7 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
     );
 
     let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+        .make_audio_decoder(audio, &AudioDecoderOptions::default())
         .map_err(|e| {
             telemetry::log(
                 "ERROR",
@@ -125,12 +132,32 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
 
     loop {
         let packet = match format.next_packet() {
-            Ok(p) => p,
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                telemetry::log(
+                    "DEBUG",
+                    "audio.decode",
+                    &format!("EOF reached packets={packets} samples={}", samples.len()),
+                );
+                break;
+            }
             Err(SymError::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 telemetry::log(
                     "DEBUG",
                     "audio.decode",
                     &format!("EOF reached packets={packets} samples={}", samples.len()),
+                );
+                break;
+            }
+            Err(SymError::ResetRequired) => {
+                decoder_errors += 1;
+                telemetry::log(
+                    "WARN",
+                    "audio.decode",
+                    &format!(
+                        "track list changed, stopping at packets={packets} samples={}",
+                        samples.len()
+                    ),
                 );
                 break;
             }
@@ -144,14 +171,14 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
             }
         };
 
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
 
         packets += 1;
         match decoder.decode(&packet) {
-            Ok(audio) => interleave(&audio, &mut samples),
-            Err(SymError::DecodeError(_) | SymError::ResetRequired) => {
+            Ok(audio_buf) => audio_buf.copy_to_vec_interleaved(&mut samples),
+            Err(SymError::DecodeError(_)) => {
                 decoder_errors += 1;
                 telemetry::log(
                     "WARN",
@@ -180,21 +207,4 @@ pub fn decode_file(path: &Path) -> Result<AudioBufferOut, DecodeError> {
         sample_rate,
         channels,
     })
-}
-
-/// Interleave all channels of `buffer` into `out` (f32, [-1, 1]).
-///
-/// Uses `AudioBufferRef::make_equivalent` to allocate a destination of the
-/// right layout, then `convert` for sample-format conversion.
-fn interleave(buffer: &AudioBufferRef<'_>, out: &mut Vec<f32>) {
-    let mut dst: AudioBuffer<f32> = buffer.make_equivalent();
-    buffer.convert(&mut dst);
-    let plane_refs = dst.planes();
-    let planes = plane_refs.planes();
-    let frames = planes.first().map_or(0, |p| p.len());
-    for frame_idx in 0..frames {
-        for plane in planes {
-            out.push(plane[frame_idx]);
-        }
-    }
 }
