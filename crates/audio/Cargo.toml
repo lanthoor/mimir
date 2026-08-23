@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 symphonia = { version = "0.6", features = ["all"] }
-thiserror = "1"
+thiserror = "2"
 rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-all"], optional = true }
 mimir-telemetry = { path = "../telemetry" }
 
