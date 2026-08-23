@@ -13,13 +13,56 @@ mod tests;
 pub use error::AppError;
 pub use state::AppState;
 
+/// Pull the album id out of a `mimircover://localhost/cover/{id}` path.
+/// Kept as a free function (not feature-gated) so it's testable without
+/// the GTK/webkit2gtk deps and out of the request-handling closure.
+/// `.path()` already drops any query string, so `/cover/5?x=1` → `5`.
+pub fn cover_id_from_path(path: &str) -> Option<i64> {
+    path.strip_prefix("/cover/")
+        .and_then(|id| id.parse::<i64>().ok())
+}
+
 /// Entry point invoked from `main.rs`. Wraps the Tauri builder so the
 /// library + tests can be built without the GTK/webkit2gtk system deps.
 #[cfg(feature = "tauri")]
 pub fn run() {
+    use tauri::http::{header::CONTENT_TYPE, Request, Response, StatusCode};
+    use tauri::Manager;
+
+    /// Serve `mimircover://localhost/cover/{album_id}` so the webview can
+    /// load cover art as a plain resource — no JSON round-trip, no base64,
+    /// no main-thread serialization of megabytes (which is what froze the
+    /// Albums view).
+    fn cover_response(request: Request<Vec<u8>>, app: &tauri::AppHandle) -> Response<Vec<u8>> {
+        let id = cover_id_from_path(request.uri().path());
+
+        let row = id.and_then(|id| {
+            let state: tauri::State<AppState> = app.state();
+            let lib = state.library().ok()?;
+            let conn = lib.conn().ok()?;
+            mimir_core::db::album_cover(&conn, id).ok()?
+        });
+
+        match row {
+            Some(row) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, row.mime_type.as_str())
+                .header("Cache-Control", "public, max-age=3600")
+                .body(row.data)
+                .expect("cover response builder"),
+            None => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Vec::new())
+                .expect("404 response builder"),
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state::AppState::new())
+        .register_uri_scheme_protocol("mimircover", |ctx, request| {
+            cover_response(request, ctx.app_handle())
+        })
         .invoke_handler(tauri::generate_handler![
             command::library_open,
             command::library_status,
@@ -37,7 +80,6 @@ pub fn run() {
             command::library_list_years,
             command::library_list_tracks,
             command::library_query_tracks,
-            command::library_album_cover,
             command::library_get_editable_track,
             command::library_update_track,
             command::library_clear_track_field,

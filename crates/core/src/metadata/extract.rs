@@ -96,12 +96,12 @@ fn extract_from_tagged(tagged: &lofty::file::TaggedFile) -> Tags {
 
     Tags {
         title: read_str(primary, &ItemKey::TrackTitle),
-        artist: read_str(primary, &ItemKey::TrackArtist),
+        artist: read_artist(primary, &ItemKey::TrackArtist),
         album: read_str(primary, &ItemKey::AlbumTitle),
-        album_artist: read_str(primary, &ItemKey::AlbumArtist),
-        track_no: read_u32(primary, &ItemKey::TrackNumber),
-        disc_no: read_u32(primary, &ItemKey::DiscNumber),
-        year: read_u32(primary, &ItemKey::Year),
+        album_artist: read_artist(primary, &ItemKey::AlbumArtist),
+        track_no: read_track_no(primary, &ItemKey::TrackNumber),
+        disc_no: read_track_no(primary, &ItemKey::DiscNumber),
+        year: read_year(primary),
         genre: read_str(primary, &ItemKey::Genre),
         composer: read_str(primary, &ItemKey::Composer),
         lyrics: read_str(primary, &ItemKey::Lyrics),
@@ -119,21 +119,62 @@ fn extract_from_tagged(tagged: &lofty::file::TaggedFile) -> Tags {
 }
 
 fn read_str(tag: &Tag, key: &ItemKey) -> Option<String> {
-    for item in tag.items() {
-        if item.key() == key {
-            return item.value().text().map(str::to_string);
+    tag.get_string(key).map(str::to_string)
+}
+
+/// `read_str` with a trim — some taggers (esp. for `ARTIST`) pad with
+/// zero-width spaces or trailing whitespace that confuses downstream joins
+/// and equality checks.
+fn read_artist(tag: &Tag, key: &ItemKey) -> Option<String> {
+    read_str(tag, key)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Read a track or disc number. Tag values can be `"3"`, `"3/12"` (track
+/// 3 of 12), or even `"03"` — we take the part before `/` and parse.
+fn read_track_no(tag: &Tag, key: &ItemKey) -> Option<u32> {
+    let s = read_str(tag, key)?;
+    let first = s.split('/').next().unwrap_or(s.as_str());
+    first.trim().parse::<u32>().ok()
+}
+
+/// Read a year. Lofty splits this into two `ItemKey`s: `Year` (4-digit
+/// string, `ID3v2` TYER-style) and `RecordingDate` (full ISO timestamp or
+/// `YYYY`, e.g. `"2024-03-15"`). Many formats (Vorbis, MP4, AIFF) only
+/// expose `RecordingDate`. Prefer `RecordingDate` when present — it carries
+/// the full date and is more specific. Fall back to `Year` for `ID3v2.3`
+/// files that only have TYER.
+fn read_year(tag: &Tag) -> Option<u32> {
+    for key in [&ItemKey::RecordingDate, &ItemKey::Year] {
+        if let Some(text) = read_str(tag, key) {
+            if let Some(year) = parse_year_string(&text) {
+                return Some(year);
+            }
         }
     }
     None
 }
 
-fn read_u32(tag: &Tag, key: &ItemKey) -> Option<u32> {
-    for item in tag.items() {
-        if item.key() == key {
-            return item.value().text().and_then(|s| s.parse::<u32>().ok());
+fn parse_year_string(text: &str) -> Option<u32> {
+    // Take the first 4 consecutive digits from the leading numeric chunk.
+    // Handles: "2024", "2024-03-15", "2024/03/15", "20240315".
+    let mut digits = String::with_capacity(4);
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            if digits.len() == 4 {
+                break;
+            }
+        } else if !digits.is_empty() {
+            // First non-digit after digits terminates the year component.
+            break;
         }
     }
-    None
+    if digits.len() != 4 {
+        return None;
+    }
+    digits.parse::<u32>().ok()
 }
 
 /// Parse a `ReplayGain` dB value from any tag item whose key matches
@@ -163,4 +204,74 @@ fn parse_db_string(text: &str) -> Option<f64> {
         .filter(|c| !c.is_whitespace() && *c != ',')
         .collect();
     cleaned.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lofty::tag::TagType;
+
+    #[test]
+    fn parse_year_handles_iso_date() {
+        assert_eq!(parse_year_string("2024-03-15"), Some(2024));
+        assert_eq!(parse_year_string("2024/03/15"), Some(2024));
+        assert_eq!(parse_year_string("2024"), Some(2024));
+        assert_eq!(parse_year_string("20240315"), Some(2024));
+        assert_eq!(parse_year_string("1999-12-31T23:59:59"), Some(1999));
+    }
+
+    #[test]
+    fn parse_year_rejects_non_years() {
+        assert_eq!(parse_year_string(""), None);
+        assert_eq!(parse_year_string("abc"), None);
+        assert_eq!(parse_year_string("24"), None); // 2 digits is not a year
+    }
+
+    #[test]
+    fn read_year_falls_back_to_recording_date() {
+        // RecordingDate is the common Vorbis/MP4 field; year must be read from it.
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::RecordingDate, "2023-06-12".into());
+        assert_eq!(read_year(&tag), Some(2023));
+
+        // Vorbis files with the older `YEAR=` (rare) should also work.
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::Year, "1995".into());
+        assert_eq!(read_year(&tag), Some(1995));
+
+        // Both set — RecordingDate wins because it carries the full date.
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::Year, "2000".into());
+        tag.insert_text(ItemKey::RecordingDate, "2024".into());
+        assert_eq!(read_year(&tag), Some(2024));
+    }
+
+    #[test]
+    fn read_track_no_handles_total_format() {
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackNumber, "3/12".into());
+        assert_eq!(read_track_no(&tag, &ItemKey::TrackNumber), Some(3));
+
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackNumber, " 7 ".into());
+        assert_eq!(read_track_no(&tag, &ItemKey::TrackNumber), Some(7));
+
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackNumber, "nope".into());
+        assert_eq!(read_track_no(&tag, &ItemKey::TrackNumber), None);
+    }
+
+    #[test]
+    fn read_artist_trims_and_skips_empty() {
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackArtist, "  Björk  ".into());
+        assert_eq!(
+            read_artist(&tag, &ItemKey::TrackArtist),
+            Some("Björk".into())
+        );
+
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackArtist, "   ".into());
+        assert_eq!(read_artist(&tag, &ItemKey::TrackArtist), None);
+    }
 }

@@ -29,9 +29,13 @@ Current pinned version: **Rust 1.97.1**.
 `rustup` will pick up `rust-toolchain.toml` automatically when you `cargo build`
 in the repo root. No extra setup is needed beyond a working `rustup`.
 
-The project is currently **Rust-only**. There is no Node.js, npm, or other
-language toolchain in scope; if a frontend is added later (Tier 0 introduces
-Tauri), a separate Node pin will be added and documented here.
+**Frontend (Tauri UI)** — `crates/app/ui/` is a Vite + React + TypeScript +
+Tailwind app (shadcn/ui components) served inside the Tauri shell. It has
+its own `package.json`. Toolchain: **Node 26** (CI uses
+`actions/setup-node` with `node-version: 26`). No bundler is built into the
+Cargo workspace — the frontend builds with `npm`, and Tauri's
+`beforeBuildCommand` / `beforeDevCommand` invoke `npm run build` /
+`npm run dev` from that directory (see `crates/app/tauri.conf.json`).
 
 ## Local checks
 
@@ -42,6 +46,14 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --workspace
+```
+
+Frontend (from `crates/app/ui/`):
+
+```bash
+npm ci
+npm run lint
+npm run build
 ```
 
 The `clippy` invocation treats warnings as errors (`-D warnings`), so fix
@@ -55,10 +67,10 @@ several `clippy::pedantic` lints are enabled at the `warn` level.
 2. Keep commits small and self-contained. Each logical step is one commit
    (TDD: write the failing test first, then the smallest change that makes it
    pass, then refactor).
-3. Open a PR against `main`. The four required status checks (`fmt`, `clippy`,
-   `test`, `build`) must pass before merge.
+3. Open a PR against `main`. The required status checks (`fmt`, `clippy`, `test`, `build`,
+   `ui`) must pass before merge.
 4. Branch protection on `main` restricts push access to repo admins and
-   requires the four checks. Stale reviews are auto-dismissed only by admins.
+   requires the checks above. Stale reviews are auto-dismissed only by admins.
 
 ### Stacked PRs
 

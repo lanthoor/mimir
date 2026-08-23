@@ -1,7 +1,7 @@
 //! IPC commands invoked from the Svelte front-end.
 
 #[cfg(feature = "tauri")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "tauri")]
 use mimir_audio::TransportCommand;
@@ -14,6 +14,8 @@ use mimir_core::rusqlite;
 use crate::error::AppError;
 #[cfg(feature = "tauri")]
 use crate::state::{AppState, LibraryStatus};
+#[cfg(feature = "tauri")]
+use tauri::Emitter;
 
 /// Open (or create) the library database at `path`.
 #[cfg(feature = "tauri")]
@@ -112,52 +114,104 @@ pub fn library_reveal_in_file_manager(
     state.reveal_in_file_manager(&path)
 }
 
-/// Enqueue a folder for scanning. Returns the folder row id plus a
-/// summary so the UI can tell the user "no audio files found" etc.
-#[cfg(feature = "tauri")]
-#[derive(Debug, serde::Serialize, Clone)]
-pub struct AddFolderResult {
-    pub folder_id: i64,
-    pub summary: mimir_core::scanner::ScanSummary,
-}
-
+/// Enqueue a folder for scanning. Returns the folder row id immediately;
+/// the actual walk + hash + ingest runs on a background thread. The UI
+/// listens for `scan:done` / `scan:error` events to know when it finishes.
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn library_add_folder(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     path: String,
-) -> Result<AddFolderResult, AppError> {
-    let (id, summary) = state.add_folder(Path::new(&path))?;
-    Ok(AddFolderResult {
-        folder_id: id,
-        summary,
-    })
+) -> Result<i64, AppError> {
+    let path_buf = Path::new(&path).to_path_buf();
+    let state_path = path_buf.clone();
+    state.add_folder(
+        Path::new(&path),
+        Some(move |result| {
+            let path_str = state_path.to_string_lossy().into_owned();
+            match result {
+                Ok(summary) => {
+                    let _ = app.emit(
+                        "scan:done",
+                        ScanDonePayload {
+                            path: path_str,
+                            summary,
+                        },
+                    );
+                }
+                Err(err) => {
+                    let _ = app.emit(
+                        "scan:error",
+                        ScanErrorPayload {
+                            path: path_str,
+                            error: err,
+                        },
+                    );
+                }
+            }
+        }),
+    )
 }
 
-/// Add multiple folders in one call. Returns one `AddFolderResult` per path
-/// (in the same order) so the UI can surface per-folder outcomes.
+/// Add multiple folders in one call. Each scan runs independently on the
+/// background and emits its own `scan:done` / `scan:error`.
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn library_add_folders(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     paths: Vec<String>,
-) -> Result<Vec<AddFolderResult>, AppError> {
+) -> Result<Vec<i64>, AppError> {
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
-        let (id, summary) = state.add_folder(Path::new(&p))?;
-        out.push(AddFolderResult {
-            folder_id: id,
-            summary,
-        });
+        let path_buf = PathBuf::from(&p);
+        let path_for_cb = path_buf.clone();
+        let app_for_cb = app.clone();
+        let id = state.add_folder(
+            &path_buf,
+            Some(move |result| {
+                let path_str = path_for_cb.to_string_lossy().into_owned();
+                match result {
+                    Ok(summary) => {
+                        let _ = app_for_cb.emit(
+                            "scan:done",
+                            ScanDonePayload {
+                                path: path_str,
+                                summary,
+                            },
+                        );
+                    }
+                    Err(err) => {
+                        let _ = app_for_cb.emit(
+                            "scan:error",
+                            ScanErrorPayload {
+                                path: path_str,
+                                error: err,
+                            },
+                        );
+                    }
+                }
+            }),
+        )?;
+        out.push(id);
     }
     Ok(out)
 }
 
+/// Payload for `scan:done` / `scan:error` events.
 #[cfg(feature = "tauri")]
-impl From<(i64, mimir_core::scanner::ScanSummary)> for AddFolderResult {
-    fn from((folder_id, summary): (i64, mimir_core::scanner::ScanSummary)) -> Self {
-        Self { folder_id, summary }
-    }
+#[derive(Debug, Clone, serde::Serialize)]
+struct ScanDonePayload {
+    path: String,
+    summary: mimir_core::scanner::ScanSummary,
+}
+
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, serde::Serialize)]
+struct ScanErrorPayload {
+    path: String,
+    error: String,
 }
 
 /// Full-text search across the library. Returns matching tracks.
@@ -169,17 +223,6 @@ pub fn library_search(
     limit: Option<i64>,
 ) -> Result<Vec<TrackRow>, AppError> {
     state.search(&query, limit.unwrap_or(50))
-}
-
-/// Cover art for an album as `(mime_type, bytes)`. `None` when the album
-/// has no embedded (or fetched) cover.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub fn library_album_cover(
-    state: tauri::State<'_, AppState>,
-    album_id: i64,
-) -> Result<Option<(String, Vec<u8>)>, AppError> {
-    state.album_cover(album_id)
 }
 
 /// Paged list of albums.

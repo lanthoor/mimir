@@ -164,13 +164,17 @@ impl AppState {
         Ok(lib)
     }
 
-    /// Enqueue a folder for scanning. The actual scan is async — this
-    /// command returns once the folder row is upserted. A scan worker drains
-    /// the channel on a background thread.
-    pub fn add_folder(
-        &self,
-        root: &Path,
-    ) -> Result<(i64, mimir_core::scanner::ScanSummary), AppError> {
+    /// Upsert the folder row, kick off the scan on a background thread, and
+    /// return the `folder_id` immediately. The actual walk + hash runs off
+    /// the main thread so the IPC handler (and the UI) never block on it.
+    ///
+    /// `on_done` is invoked from the scan thread with the `ScanSummary` on
+    /// success or the error string on failure. Pass `None` in tests / callers
+    /// that don't want Tauri events.
+    pub fn add_folder<F>(&self, root: &Path, on_done: Option<F>) -> Result<i64, AppError>
+    where
+        F: FnOnce(Result<mimir_core::scanner::ScanSummary, String>) + Send + 'static,
+    {
         telemetry::log(
             "INFO",
             "app",
@@ -200,95 +204,54 @@ impl AppState {
             }
         };
 
-        // Spawn a worker on first call.
-        let mut inner = self.inner.lock().expect("state poisoned");
-        if inner.scan_tx.is_none() {
-            let (tx, rx) = channel::<ScanJob>();
-            let worker_lib = lib.clone();
-            let target = root.to_path_buf();
-            std::thread::spawn(move || {
-                telemetry::log(
-                    "INFO",
-                    "app",
-                    &format!("scan worker thread spawned target={}", target.display()),
-                );
-                mimir_core::metadata::run_worker(&worker_lib.conn().expect("conn"), rx);
-            });
-            inner.scan_tx = Some(tx);
-            telemetry::log("INFO", "app", "scan_tx initialised");
-        }
-        drop(inner);
+        let tx = self.ensure_scan_worker(&lib, root);
+        spawn_scan_thread(lib, root.to_path_buf(), tx, on_done);
 
-        // Walk + emit jobs synchronously here; the worker picks them up.
-        let tx = self
-            .inner
-            .lock()
-            .expect("state poisoned")
-            .scan_tx
-            .as_ref()
-            .expect("scan_tx")
-            .clone();
-        let conn = lib.conn()?;
-        match mimir_core::scanner::scan_root(&conn, root, tx) {
-            Ok(summary) => {
-                if summary.sent == 0 {
-                    telemetry::log(
-                        "WARN",
-                        "app",
-                        &format!(
-                            "add_folder scanned but found no audio files root={} walked={} hashed_fail={} known={}",
-                            root.display(),
-                            summary.walked,
-                            summary.hashed_fail,
-                            summary.known
-                        ),
-                    );
-                } else {
-                    telemetry::log(
-                        "INFO",
-                        "app",
-                        &format!(
-                            "add_folder ok folder_id={folder_id} root={} sent={} known={} walked={}",
-                            root.display(),
-                            summary.sent,
-                            summary.known,
-                            summary.walked
-                        ),
-                    );
-                }
-                Ok((folder_id, summary))
-            }
-            Err(e) => {
-                telemetry::log(
-                    "ERROR",
-                    "app",
-                    &format!(
-                        "add_folder scan_root failed folder_id={folder_id} root={} err={e}",
-                        root.display()
-                    ),
-                );
-                Err(e.into())
-            }
-        }
+        Ok(folder_id)
     }
 
-    /// Add multiple folders in one go. Each is upserted by path so re-adding
-    /// the same root is a no-op. Workers drain scan jobs on a shared thread.
-    pub fn add_folders<I, P>(
-        &self,
-        paths: I,
-    ) -> Result<Vec<(i64, mimir_core::scanner::ScanSummary)>, AppError>
+    /// Make sure the scan-worker thread is running and return a clone of its
+    /// `Sender`. Spawns the worker on first call.
+    fn ensure_scan_worker(&self, lib: &mimir_core::db::Library, root: &Path) -> Sender<ScanJob> {
+        let mut inner = self.inner.lock().expect("state poisoned");
+        if let Some(tx) = inner.scan_tx.as_ref() {
+            return tx.clone();
+        }
+        let (tx, rx) = channel::<ScanJob>();
+        let worker_lib = lib.clone();
+        let target = root.to_path_buf();
+        std::thread::spawn(move || {
+            telemetry::log(
+                "INFO",
+                "app",
+                &format!("scan worker thread spawned target={}", target.display()),
+            );
+            mimir_core::metadata::run_worker(&worker_lib, rx);
+        });
+        inner.scan_tx = Some(tx.clone());
+        telemetry::log("INFO", "app", "scan_tx initialised");
+        tx
+    }
+
+    /// Add multiple folders. Each upsert is fast; the scan runs in the
+    /// background per folder. Returns the list of `folder_id`s on success.
+    /// Callers that need per-folder completion callbacks should iterate
+    /// `add_folder` themselves.
+    pub fn add_folders<I, P>(&self, paths: I) -> Result<Vec<i64>, AppError>
     where
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
         telemetry::log("INFO", "app", "add_folders enter batch");
-        let mut out: Vec<(i64, mimir_core::scanner::ScanSummary)> = Vec::new();
+        let mut out: Vec<i64> = Vec::new();
         let mut n = 0u64;
         for p in paths {
             n += 1;
-            match self.add_folder(p.as_ref()) {
-                Ok(r) => out.push(r),
+            match self.add_folder::<fn(Result<mimir_core::scanner::ScanSummary, String>)>(
+                p.as_ref(),
+                None,
+            ) {
+                Ok(id) => out.push(id),
                 Err(e) => {
                     telemetry::log(
                         "ERROR",
@@ -931,6 +894,81 @@ impl AppState {
         let inner = self.inner.lock().expect("state poisoned");
         inner.player.as_ref().map(mimir_audio::Player::snapshot)
     }
+}
+
+/// Walk + hash + send for a single folder on a background thread. `on_done`
+/// is invoked once when the scan finishes (success or failure). Kept as a
+/// free function so `add_folder` stays under the clippy line-count limit.
+fn spawn_scan_thread<F>(
+    lib: mimir_core::db::Library,
+    root: PathBuf,
+    tx: Sender<ScanJob>,
+    on_done: Option<F>,
+) where
+    F: FnOnce(Result<mimir_core::scanner::ScanSummary, String>) + Send + 'static,
+{
+    let result_root = root.clone();
+    std::thread::spawn(move || {
+        let conn = match lib.conn() {
+            Ok(c) => c,
+            Err(e) => {
+                telemetry::log(
+                    "ERROR",
+                    "app",
+                    &format!("add_folder scan: conn failed: {e}"),
+                );
+                if let Some(cb) = on_done {
+                    cb(Err(format!("connection acquire: {e}")));
+                }
+                return;
+            }
+        };
+        match mimir_core::scanner::scan_root(&conn, &root, tx) {
+            Ok(summary) => {
+                if summary.sent == 0 {
+                    telemetry::log(
+                        "WARN",
+                        "app",
+                        &format!(
+                            "add_folder scan: no new audio files root={} walked={} hashed_fail={} known={}",
+                            result_root.display(),
+                            summary.walked,
+                            summary.hashed_fail,
+                            summary.known
+                        ),
+                    );
+                } else {
+                    telemetry::log(
+                        "INFO",
+                        "app",
+                        &format!(
+                            "add_folder scan ok root={} sent={} known={} walked={}",
+                            result_root.display(),
+                            summary.sent,
+                            summary.known,
+                            summary.walked
+                        ),
+                    );
+                }
+                if let Some(cb) = on_done {
+                    cb(Ok(summary));
+                }
+            }
+            Err(e) => {
+                telemetry::log(
+                    "ERROR",
+                    "app",
+                    &format!(
+                        "add_folder scan: scan_root failed root={} err={e}",
+                        result_root.display()
+                    ),
+                );
+                if let Some(cb) = on_done {
+                    cb(Err(e.to_string()));
+                }
+            }
+        }
+    });
 }
 
 impl Default for AppState {
