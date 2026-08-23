@@ -2124,7 +2124,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2135,7 +2135,7 @@ dependencies = [
  "rodio",
  "symphonia 0.6.1",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2152,7 +2152,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
  "walkdir",
 ]
 
