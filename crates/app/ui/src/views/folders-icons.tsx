@@ -58,7 +58,7 @@ export function FoldersIcons() {
       <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
         {current != null && (
           <Card
-            className="flex cursor-pointer flex-col items-center gap-1 border-dashed p-3 text-muted-foreground transition-colors hover:border-primary"
+            className="flex min-w-0 cursor-pointer flex-col items-center gap-1 border-dashed p-3 text-muted-foreground transition-colors hover:border-primary"
             onDoubleClick={() => {
               const parent = current.path.replace(/\/[^/]+$/, "") || null;
               setCwd(parent === current.path ? null : parent);
@@ -133,14 +133,14 @@ function FolderIcon({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <Card
-          className="flex cursor-pointer flex-col items-center gap-1 p-3 transition-colors hover:border-primary"
+          className="flex min-w-0 cursor-pointer flex-col items-center gap-1 p-3 transition-colors hover:border-primary"
           onDoubleClick={onOpen}
         >
-          <Folder className="h-10 w-10 text-muted-foreground" />
-          <div className="truncate text-center text-sm font-semibold">
+          <Folder className="h-10 w-10 shrink-0 text-muted-foreground" />
+          <div className="line-clamp-1 w-full break-words text-center text-sm font-semibold">
             {node.name ?? basename(node.path)}
           </div>
-          <div className="truncate text-center text-xs text-muted-foreground">
+          <div className="line-clamp-2 w-full break-words text-center text-xs text-muted-foreground">
             {node.path}
           </div>
         </Card>
