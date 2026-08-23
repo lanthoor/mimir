@@ -16,6 +16,7 @@ export function useLibrary() {
   const setAlbumsList = useStore((s) => s.setAlbumsList);
   const setGenresList = useStore((s) => s.setGenresList);
   const setYearsList = useStore((s) => s.setYearsList);
+  const setArtistsList = useStore((s) => s.setArtistsList);
   const setFolderTree = useStore((s) => s.setFolderTree);
   const setCwd = useStore((s) => s.setCwd);
 
@@ -68,6 +69,8 @@ export function useLibrary() {
         setGenresList(await ipc.libraryListGenres());
       } else if (view === "years") {
         setYearsList(await ipc.libraryListYears());
+      } else if (view === "artists") {
+        setArtistsList(await ipc.libraryListArtists());
       } else if (view === "folders") {
         const tree = await ipc.libraryFolderTree();
         setFolderTree(tree);
@@ -92,6 +95,7 @@ export function useLibrary() {
     setTracksList,
     setGenresList,
     setYearsList,
+    setArtistsList,
     setFolderTree,
     setCwd,
     refreshAlbums,

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "tauri")]
 use mimir_audio::TransportCommand;
 #[cfg(feature = "tauri")]
-use mimir_core::query::{AlbumRow, FolderView, GenreRow, TrackRow, YearRow};
+use mimir_core::query::{AlbumRow, ArtistRow, FolderView, GenreRow, TrackRow, YearRow};
 #[cfg(feature = "tauri")]
 use mimir_core::rusqlite;
 
@@ -248,6 +248,13 @@ pub fn library_list_genres(state: tauri::State<'_, AppState>) -> Result<Vec<Genr
 #[tauri::command]
 pub fn library_list_years(state: tauri::State<'_, AppState>) -> Result<Vec<YearRow>, AppError> {
     state.list_years()
+}
+
+/// All artists in the library with track counts, sorted by sort name.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_artists(state: tauri::State<'_, AppState>) -> Result<Vec<ArtistRow>, AppError> {
+    state.list_artists()
 }
 
 /// Tracks filtered by optional genre/year/artist/album facets.

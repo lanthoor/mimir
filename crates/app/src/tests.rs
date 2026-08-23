@@ -235,6 +235,27 @@ fn list_albums_returns_inserted_album() {
     assert_eq!(rows[0].year, Some(1997));
 }
 
+#[test]
+fn list_artists_returns_inserted_artists() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.sqlite");
+    let state = AppState::new();
+    state.open_library(&db).expect("open");
+    let conn = state.library().expect("lib").conn().expect("conn");
+    let artist_id = upsert_artist(&conn, "Björk").expect("artist");
+    upsert_album(&conn, "Homogénic", artist_id, Some(1997)).expect("album");
+
+    let rows = state.list_artists().expect("list");
+    // Migration 0004 seeds "Unknown Artist" — expect Björk plus that placeholder.
+    let names: Vec<String> = rows.iter().map(|a| a.name.clone()).collect();
+    assert!(names.contains(&"Björk".to_string()), "expected Björk, got {names:?}");
+    let bjork = rows.iter().find(|a| a.name == "Björk").expect("bjork");
+    assert_eq!(
+        bjork.track_count, 0,
+        "no tracks seeded yet, so zero tracks under this artist"
+    );
+}
+
 #[cfg(feature = "tauri")]
 #[test]
 fn get_editable_track_returns_seed_values() {

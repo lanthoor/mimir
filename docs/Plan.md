@@ -99,11 +99,18 @@ Each tier after S0 deepens one axis; nothing cross-cuts until a tier lands.
 **Goal:** make the library feel right.
 
 - Albums/Artists get real cover art from embedded data.
-- Genre / Year / Folder / Label / Composer views.
-- Faceted filters + saved searches.
-- Inline + batch tag editor with revert.
+- Genre / Year / Folder views; Artists view.
+- Faceted filters.
+- Inline tag editor (DB-only).
 - Lyrics parse + display.
-- Drag-drop folder add; multi-select folder operations.
+- Drag-drop folder add; multi-folder batch add IPC.
+
+### Deferred (dropped from Tier 1 — revisit explicitly if needed)
+
+- Saved searches.
+- Batch tag editor with revert.
+- Multi-select folder operations (kept as the very last stretch item).
+- Label / Composer views.
 
 ## Tier 2 — Playback quality (S2)
 

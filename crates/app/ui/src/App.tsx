@@ -12,6 +12,7 @@ import { useScanEvents } from "@/hooks/use-scan-events";
 import { useStore } from "@/lib/store";
 import { TracksView } from "@/views/tracks-view";
 import { AlbumsView } from "@/views/albums-view";
+import { ArtistsView } from "@/views/artists-view";
 import { GenresView } from "@/views/genres-view";
 import { YearsView } from "@/views/years-view";
 import { FoldersView } from "@/views/folders-view";
@@ -33,12 +34,7 @@ function ViewRouter() {
     case "queue":
       return <QueueView />;
     case "artists":
-      // Artists view is not yet exposed via IPC; show a placeholder.
-      return (
-        <div className="p-6 text-sm text-muted-foreground">
-          Artists view coming soon.
-        </div>
-      );
+      return <ArtistsView />;
   }
 }
 

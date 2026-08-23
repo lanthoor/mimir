@@ -28,4 +28,8 @@ Pinned to **Rust 1.97.1** via `rust-toolchain.toml`. See
 
 ## Status
 
-Walking-skeleton MVP (Plan §[Tier 0](docs/Plan.md#tier-0--walking-skeleton-mvp-s0)) in design. See [Plan](docs/Plan.md).
+MVP walking skeleton (S0) complete — ingests, indexes, browses (Tracks / Albums /
+**Artists** / Genres / Years / Folders), searches, and plays back. Release
+`0.1.0` tagged; Linux AppImage/.deb via `cargo tauri build`.
+
+Tier 1 (library depth) is in flight — see [Plan](docs/Plan.md).
