@@ -8,7 +8,7 @@
 - [Requirements (PRD)](Requirements.md)
 - [Architecture](Architecture.md)
 - [Technical Decisions](TechnicalDecisions.md)
-- [Plan](Plan.md)
+- [Plan](Plan.md) — includes the [feature checklist](Plan.md#feature-checklist), the single source of truth for feature tracking
 
 ## What it is
 
@@ -20,4 +20,4 @@ A desktop music catalog and player that watches folders, extracts/enriches metad
 
 ## Status
 
-Walking-skeleton MVP (Plan §[Tier 0](Plan.md#tier-0--walking-skeleton-mvp-s0)) in design. See [Plan](Plan.md).
+Released `0.1.0`: the Tier 0 walking-skeleton MVP plus much of Tier 1 (library depth). Exact status per feature lives in the [feature checklist](Plan.md#feature-checklist).
