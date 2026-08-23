@@ -76,6 +76,7 @@ pub fn run() {
             command::library_folder_tree,
             command::library_search,
             command::library_list_albums,
+            command::library_list_artists,
             command::library_list_genres,
             command::library_list_years,
             command::library_list_tracks,

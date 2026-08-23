@@ -46,6 +46,13 @@ export type YearRow = {
   track_count: number;
 };
 
+export type ArtistRow = {
+  id: number;
+  name: string;
+  sort_name: string | null;
+  track_count: number;
+};
+
 export type FolderFile = {
   path: string;
   title: string | null;

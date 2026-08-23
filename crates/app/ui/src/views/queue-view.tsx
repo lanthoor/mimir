@@ -149,7 +149,7 @@ export function QueueView() {
                 }
               >
                 <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                  {item.index}
+                  {item.index + 1}
                 </span>
                 {item.is_current ? null : (
                   <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground" />

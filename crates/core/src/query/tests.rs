@@ -115,14 +115,25 @@ fn list_artists_is_sorted_by_sort_name() {
     seed_track(root.path(), &conn, "Múm/Finally We Are/01 - We.mp3", "We");
 
     let artists: Vec<ArtistRow> = list_artists(&conn).expect("list");
-    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(artists.len(), 3, "expected 3 artists, got {artists:?}");
+
+    let by_name: std::collections::HashMap<&str, i64> = artists
+        .iter()
+        .map(|a| (a.name.as_str(), a.track_count))
+        .collect();
 
     // Sorted by sort_name (lowercase, diacritics stripped by upsert).
+    let names: Vec<&str> = artists.iter().map(|a| a.name.as_str()).collect();
     assert_eq!(
         names,
         vec!["Björk", "Múm", "Unknown Artist"],
         "expected sort order, got {names:?}"
     );
+
+    // Real artists carry their album's single track; the seeded placeholder has none.
+    assert_eq!(by_name.get("Björk"), Some(&1));
+    assert_eq!(by_name.get("Múm"), Some(&1));
+    assert_eq!(by_name.get("Unknown Artist"), Some(&0));
 }
 
 #[test]

@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import type {
   AlbumRow,
+  ArtistRow,
   FolderView,
   GenreRow,
   LibraryStatus,
@@ -85,6 +86,8 @@ type Store = {
   setGenresList: (rows: GenreRow[]) => void;
   yearsList: YearRow[];
   setYearsList: (rows: YearRow[]) => void;
+  artistsList: ArtistRow[];
+  setArtistsList: (rows: ArtistRow[]) => void;
   folderTree: FolderView;
   setFolderTree: (tree: FolderView) => void;
 
@@ -148,6 +151,8 @@ export const useStore = create<Store>()(
     setGenresList: (genresList) => set({ genresList }),
     yearsList: [],
     setYearsList: (yearsList) => set({ yearsList }),
+    artistsList: [],
+    setArtistsList: (artistsList) => set({ artistsList }),
     folderTree: { flat: [], root_children: [] },
     setFolderTree: (folderTree) => set({ folderTree }),
 

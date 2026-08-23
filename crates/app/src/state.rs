@@ -603,6 +603,16 @@ impl AppState {
         Ok(out)
     }
 
+    /// All artists (with track counts) in the library.
+    pub fn list_artists(&self) -> Result<Vec<mimir_core::query::ArtistRow>, AppError> {
+        telemetry::log("DEBUG", "app", "list_artists request");
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_artists(&conn)?;
+        telemetry::log("INFO", "app", &format!("list_artists ok n={}", out.len()));
+        Ok(out)
+    }
+
     /// Distinct years (from albums) in the library.
     pub fn list_years(&self) -> Result<Vec<mimir_core::query::YearRow>, AppError> {
         telemetry::log("DEBUG", "app", "list_years request");

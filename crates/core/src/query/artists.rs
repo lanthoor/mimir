@@ -9,15 +9,21 @@ pub struct ArtistRow {
     pub id: i64,
     pub name: String,
     pub sort_name: Option<String>,
+    /// Total number of tracks filed under this artist's albums.
+    pub track_count: i64,
 }
 
 /// Return every artist, sorted by `sort_name` (case-insensitive), with
-/// `NULL`s last.
+/// `NULL`s last, each with the track count across their albums.
 pub fn list_artists(conn: &Connection) -> Result<Vec<ArtistRow>, rusqlite::Error> {
     mimir_telemetry::log("DEBUG", "query", "list_artists");
     let mut stmt = conn.prepare(
-        "SELECT id, name, sort_name FROM artist \
-         ORDER BY sort_name COLLATE NOCASE ASC, name COLLATE NOCASE ASC",
+        "SELECT ar.id, ar.name, ar.sort_name, COUNT(t.id) \
+          FROM artist ar \
+          LEFT JOIN album a ON a.album_artist_id = ar.id \
+          LEFT JOIN track t ON t.album_id = a.id \
+          GROUP BY ar.id \
+          ORDER BY ar.sort_name COLLATE NOCASE ASC, ar.name COLLATE NOCASE ASC",
     )?;
     let rows = stmt
         .query_map([], |row| {
@@ -25,6 +31,7 @@ pub fn list_artists(conn: &Connection) -> Result<Vec<ArtistRow>, rusqlite::Error
                 id: row.get(0)?,
                 name: row.get(1)?,
                 sort_name: row.get(2)?,
+                track_count: row.get(3)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

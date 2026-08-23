@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AlbumRow,
+  ArtistRow,
   EditableTrackFields,
   FolderRow,
   FolderView,
@@ -44,6 +45,8 @@ export const libraryListAlbums = (limit = 200, offset = 0) =>
   invoke<AlbumRow[]>("library_list_albums", { limit, offset });
 
 export const libraryListGenres = () => invoke<GenreRow[]>("library_list_genres");
+
+export const libraryListArtists = () => invoke<ArtistRow[]>("library_list_artists");
 
 export const libraryListYears = () => invoke<YearRow[]>("library_list_years");
 
