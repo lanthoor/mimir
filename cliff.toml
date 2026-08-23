@@ -1,0 +1,21 @@
+[git]
+conventional_commits = true
+filter_unconventional = true
+skip_merge_commits = true
+tag_pattern = "v[0-9].*"
+sort_commits = "newest"
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^doc", group = "Docs" },
+  { message = "^refactor", group = "Refactoring" },
+  { message = "^test", group = "Tests" },
+  { message = "^style", group = "Styles" },
+  { message = "^chore\\(deps.*\\)", skip = true },
+  { message = "^chore\\(release\\):", skip = true },
+  { message = "^chore|^ci", group = "Misc" },
+]
+
+[changelog]
+trim = true
