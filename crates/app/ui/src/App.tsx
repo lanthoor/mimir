@@ -15,6 +15,7 @@ import { AlbumsView } from "@/views/albums-view";
 import { GenresView } from "@/views/genres-view";
 import { YearsView } from "@/views/years-view";
 import { FoldersView } from "@/views/folders-view";
+import { QueueView } from "@/views/queue-view";
 
 function ViewRouter() {
   const view = useStore((s) => s.view);
@@ -29,6 +30,8 @@ function ViewRouter() {
       return <YearsView />;
     case "folders":
       return <FoldersView />;
+    case "queue":
+      return <QueueView />;
     case "artists":
       // Artists view is not yet exposed via IPC; show a placeholder.
       return (

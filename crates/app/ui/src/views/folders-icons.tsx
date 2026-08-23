@@ -21,6 +21,7 @@ import { Music, ArrowUp, Folder } from "lucide-react";
 import { toast } from "sonner";
 import type { FolderFile, FolderNode } from "@/lib/types";
 import { EditTrackDialog } from "@/components/edit-track-dialog";
+import { addTracksToQueue, collectFolderTrackIds } from "@/lib/queue-actions";
 
 export function FoldersIcons() {
   const tree = useStore((s) => s.folderTree);
@@ -146,6 +147,14 @@ function FolderIcon({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onClick={onOpen}>Open</ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            const ids = collectFolderTrackIds(node);
+            void addTracksToQueue(ids, node.name ?? node.path);
+          }}
+        >
+          Add folder to queue
+        </ContextMenuItem>
         {onRemove && (
           <ContextMenuItem
             onClick={onRemove}
@@ -191,6 +200,15 @@ function FileIcon({
             onClick={onPlay}
           >
             Play
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={file.track_id == null}
+            onClick={() => {
+              if (file.track_id == null) return;
+              void addTracksToQueue([file.track_id]);
+            }}
+          >
+            Add to queue
           </ContextMenuItem>
           <ContextMenuItem
             disabled={file.track_id == null}

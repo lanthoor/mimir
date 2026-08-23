@@ -91,6 +91,13 @@ pub fn run() {
             command::audio_next,
             command::audio_previous,
             command::audio_player_snapshot,
+            command::audio_queue_enqueue_many,
+            command::audio_play_and_enqueue_many,
+            command::audio_queue_remove_at,
+            command::audio_queue_move,
+            command::audio_queue_play_at,
+            command::audio_queue_clear,
+            command::audio_queue_get,
             command::app_log,
             command::library_dump_track_paths,
         ])

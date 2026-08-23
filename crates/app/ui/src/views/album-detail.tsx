@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlbumCover } from "@/components/album-cover";
 import { useStore } from "@/lib/store";
 import * as ipc from "@/lib/ipc";
 import { AlbumTracksTable } from "@/views/album-tracks-table";
+import { addAlbumToQueue } from "@/lib/queue-actions";
 import type { TrackRow } from "@/lib/types";
 
 type Props = { albumId: number };
@@ -16,6 +17,9 @@ export function AlbumDetail({ albumId }: Props) {
     s.albumsList.find((a) => a.id === albumId),
   );
   const [tracks, setTracks] = useState<TrackRow[] | null>(null);
+  const setNowPlaying = useStore((s) => s.setNowPlaying);
+  const setNowPlayingTrackId = useStore((s) => s.setNowPlayingTrackId);
+  const setLyricsTrackId = useStore((s) => s.setLyricsTrackId);
 
   useEffect(() => {
     if (!album) {
@@ -60,6 +64,38 @@ export function AlbumDetail({ albumId }: Props) {
               <Badge variant="outline">{album.year}</Badge>
             )}
           </div>
+        </div>
+        <div className="ml-auto flex gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => {
+              if (!tracks || tracks.length === 0) return;
+              const first = tracks[0];
+              setNowPlaying(
+                first.title ?? "(untitled)",
+                first.artist_name ?? album.artist_name ?? "",
+              );
+              setNowPlayingTrackId(first.id);
+              setLyricsTrackId(first.id);
+              void ipc.audioPlayAndEnqueueMany(tracks.map((t) => t.id));
+            }}
+            disabled={!tracks || tracks.length === 0}
+          >
+            <Play />
+            Play
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!tracks || tracks.length === 0) return;
+              void addAlbumToQueue(album.id, album.title);
+            }}
+            disabled={!tracks || tracks.length === 0}
+          >
+            Add to queue
+          </Button>
         </div>
       </div>
       {tracks == null ? (
