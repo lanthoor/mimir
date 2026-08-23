@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 
-use mimir_audio::{Transport, TransportCommand};
+#[cfg(feature = "output")]
+use mimir_audio::{PlayerCommand, Transport, TransportCommand};
 use mimir_core::db::Library;
-#[cfg(feature = "tauri")]
 use mimir_core::rusqlite;
 use mimir_core::scanner::ScanJob;
 use mimir_telemetry as telemetry;
@@ -44,6 +44,20 @@ pub struct LibraryStatus {
     pub path: Option<PathBuf>,
     /// Most recent open error, if any. Cleared on the next successful open.
     pub last_error: Option<String>,
+}
+
+impl Inner {
+    /// Lazily create the audio player (shared across the session).
+    #[cfg(feature = "output")]
+    fn ensure_player(&mut self) -> Result<&mimir_audio::Player, AppError> {
+        if self.player.is_none() {
+            telemetry::log("INFO", "app", "instantiating audio Player");
+            self.player = Some(mimir_audio::Player::new());
+        }
+        self.player
+            .as_ref()
+            .ok_or_else(|| AppError::Internal("player not available".into()))
+    }
 }
 
 /// Shared state handed to every Tauri command via `tauri::State`.
@@ -842,22 +856,12 @@ impl AppState {
                 inner.player = Some(mimir_audio::Player::new());
             }
             let player = inner.player.as_ref().expect("just initialized");
-            // Prefer album gain over track gain; pass None when neither exists.
+            // Prefer album gain over track gain; the worker bakes it into
+            // the source at start (`Play` carries the gain per track).
             let gain = album_db.or(track_db);
             player
                 .handle()
-                .send(PlayerCommand::SetReplayGainDb(gain))
-                .map_err(|e| {
-                    telemetry::log(
-                        "ERROR",
-                        "app",
-                        &format!("play_track: SetReplayGainDb send err: {e}"),
-                    );
-                    AppError::from(e)
-                })?;
-            player
-                .handle()
-                .send(PlayerCommand::Play(path.clone()))
+                .send(PlayerCommand::Play(path.clone(), gain))
                 .map_err(|e| {
                     telemetry::log(
                         "ERROR",
@@ -893,6 +897,238 @@ impl AppState {
         telemetry::log("DEBUG", "app", "player_snapshot");
         let inner = self.inner.lock().expect("state poisoned");
         inner.player.as_ref().map(mimir_audio::Player::snapshot)
+    }
+
+    /// Get a clone of the player handle, lazily creating the player if
+    /// needed.
+    #[cfg(feature = "output")]
+    fn player_or_init(&self) -> Result<mimir_audio::Player, AppError> {
+        let mut inner = self.inner.lock().expect("state poisoned");
+        Ok(inner.ensure_player()?.clone())
+    }
+
+    /// The live player if one has been created, else `None` (does NOT
+    /// construct one — used by read-only projections like the queue list).
+    /// Returns `None` when the `output` feature is disabled.
+    #[cfg(feature = "output")]
+    pub fn queue_player(&self) -> Option<mimir_audio::Player> {
+        let inner = self.inner.lock().expect("state poisoned");
+        inner.player.clone()
+    }
+
+    /// Total number of tracks in the playlist, 0 when no player exists yet.
+    #[cfg(feature = "output")]
+    pub fn queue_len(&self) -> usize {
+        self.queue_player()
+            .map_or(0, |p| p.queue_view().tracks.len())
+    }
+
+    /// Advance to the next track (wraps to the start at the end).
+    #[cfg(feature = "output")]
+    pub fn queue_next(&self) -> Result<(), AppError> {
+        self.player_or_init()?
+            .handle()
+            .send(mimir_audio::PlayerCommand::Next)
+            .map_err(AppError::from)
+    }
+
+    /// Step back to the previous track (wraps to the last at the start).
+    #[cfg(feature = "output")]
+    pub fn queue_previous(&self) -> Result<(), AppError> {
+        self.player_or_init()?
+            .handle()
+            .send(mimir_audio::PlayerCommand::Previous)
+            .map_err(AppError::from)
+    }
+
+    /// Start the track at playlist position `index` (0-based, the list is a
+    /// flat persistent list — removing one just reindexes, no special pin).
+    #[cfg(feature = "output")]
+    pub fn queue_play_at(&self, index: usize) -> Result<(), AppError> {
+        let player = self.player_or_init()?;
+        if index >= player.queue_view().tracks.len() {
+            return Err(AppError::Internal("play_at index out of range".into()));
+        }
+        player
+            .handle()
+            .send(mimir_audio::PlayerCommand::PlayAt(index))
+            .map_err(AppError::from)
+    }
+
+    /// Append `track_ids` to the END of the queue. When nothing is
+    /// playing yet, the first one starts; otherwise they wait in line.
+    /// Unresolvable ids are skipped (logged), never fatal. Returns the
+    /// ids actually appended, in order.
+    #[cfg(feature = "output")]
+    pub fn queue_tracks(&self, track_ids: Vec<i64>) -> Result<Vec<i64>, AppError> {
+        if track_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let lib = self.library()?;
+        let resolved: Vec<(i64, PathBuf, Option<f64>)> = Self::resolve_track_ids(&lib, &track_ids);
+        // Preserve the caller's order (SQL `IN` returns arbitrary order).
+        let ordered = track_ids
+            .iter()
+            .filter_map(|id| resolved.iter().find(|(rid, _, _)| rid == id))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let player = self.player_or_init()?;
+        // "Add to queue" always appends; it should only START when the
+        // list is empty. A stopped-but-non-empty list is preserved (the
+        // playhead is still somewhere in it).
+        let list_was_empty = player.queue_view().tracks.is_empty();
+        let h = player.handle();
+        let mut appended: Vec<i64> = Vec::new();
+        for (id, path, gain) in ordered {
+            let cmd = if appended.is_empty() && list_was_empty {
+                PlayerCommand::Play(path.clone(), gain)
+            } else {
+                PlayerCommand::Enqueue(path, gain)
+            };
+            if let Err(e) = h.send(cmd) {
+                telemetry::log("ERROR", "app", &format!("queue: send failed id={id}: {e}"));
+                continue;
+            }
+            appended.push(id);
+        }
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "queue_tracks requested={} appended={}",
+                track_ids.len(),
+                appended.len()
+            ),
+        );
+        Ok(appended)
+    }
+
+    /// Play `track_ids` in order: the first starts immediately, the rest
+    /// are queued behind it — as one atomic command.
+    /// Returns the ids actually used, in order.
+    #[cfg(feature = "output")]
+    pub fn play_and_enqueue(&self, track_ids: Vec<i64>) -> Result<Vec<i64>, AppError> {
+        if track_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let lib = self.library()?;
+        let resolved: Vec<(i64, PathBuf, Option<f64>)> = Self::resolve_track_ids(&lib, &track_ids);
+        let ordered = track_ids
+            .iter()
+            .filter_map(|id| resolved.iter().find(|(rid, _, _)| rid == id))
+            .cloned()
+            .collect::<Vec<_>>();
+        if ordered.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (head, tail) = ordered.split_first().expect("non-empty");
+        let rest: Vec<mimir_audio::QueueTrack> =
+            tail.iter().map(|(_, p, g)| (p.clone(), *g)).collect();
+        let player = self.player_or_init()?;
+        let h = player.handle();
+        h.send(mimir_audio::PlayerCommand::PlayAndEnqueue {
+            first: head.1.clone(),
+            gain: head.2,
+            rest,
+        })
+        .map_err(AppError::from)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "play_and_enqueue first={} rest={}",
+                head.1.display(),
+                tail.len()
+            ),
+        );
+        Ok(ordered.into_iter().map(|(id, _, _)| id).collect())
+    }
+
+    /// Remove the track at playlist position `index` (0-based, flat list).
+    /// Removing the currently playing track starts the one that slides into
+    /// its slot.
+    #[cfg(feature = "output")]
+    pub fn queue_remove_at(&self, index: usize) -> Result<(), AppError> {
+        let player = self.player_or_init()?;
+        if index >= player.queue_view().tracks.len() {
+            return Err(AppError::Internal("remove_at index out of range".into()));
+        }
+        player
+            .handle()
+            .send(mimir_audio::PlayerCommand::RemoveAt(index))
+            .map_err(AppError::from)
+    }
+
+    /// Move a playlist entry from `from` to `to` (0-based, flat list).
+    #[cfg(feature = "output")]
+    pub fn queue_move(&self, from: usize, to: usize) -> Result<(), AppError> {
+        if from == to {
+            return Ok(());
+        }
+        let player = self.player_or_init()?;
+        let len = player.queue_view().tracks.len();
+        if from >= len || to >= len {
+            return Err(AppError::Internal("move index out of range".into()));
+        }
+        player
+            .handle()
+            .send(mimir_audio::PlayerCommand::Move { from, to })
+            .map_err(AppError::from)
+    }
+
+    /// Clear the queue and stop.
+    #[cfg(feature = "output")]
+    pub fn queue_clear(&self) -> Result<(), AppError> {
+        let player = self.player_or_init()?;
+        player
+            .handle()
+            .send(PlayerCommand::ClearQueue)
+            .map_err(AppError::from)
+    }
+
+    /// Resolve a list of track ids to `(id, path, replay_gain_db)` tuples.
+    /// Order is preserved; missing ids are dropped.
+    #[cfg(feature = "output")]
+    fn resolve_track_ids(lib: &Library, ids: &[i64]) -> Vec<(i64, PathBuf, Option<f64>)> {
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        let conn = match lib.conn() {
+            Ok(c) => c,
+            Err(e) => {
+                telemetry::log("ERROR", "app", &format!("resolve_track_ids conn: {e}"));
+                return Vec::new();
+            }
+        };
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT id, path, COALESCE(replaygain_album_db, replaygain_track_db) \
+             FROM track WHERE id IN ({placeholders})"
+        );
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(e) => {
+                telemetry::log("ERROR", "app", &format!("resolve_track_ids prepare: {e}"));
+                return Vec::new();
+            }
+        };
+        let rows = match stmt.query_map(rusqlite::params_from_iter(ids.iter().copied()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+            ))
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                telemetry::log("ERROR", "app", &format!("resolve_track_ids query: {e}"));
+                return Vec::new();
+            }
+        };
+        rows.filter_map(Result::ok)
+            .map(|(id, path, gain)| (id, PathBuf::from(path), gain))
+            .collect()
     }
 }
 

@@ -9,6 +9,7 @@ const TOOLBAR_FOR: Record<ViewKey, () => React.ReactNode> = {
   artists: () => null,
   genres: () => null,
   years: () => null,
+  queue: () => null,
 };
 
 export function ViewToolbar({ view }: { view: ViewKey }) {

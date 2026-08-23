@@ -11,6 +11,7 @@ import {
 import * as ipc from "@/lib/ipc";
 import { toast } from "sonner";
 import type { FolderNode } from "@/lib/types";
+import { addTracksToQueue, collectFolderTrackIds } from "@/lib/queue-actions";
 
 export function FoldersTree() {
   const tree = useStore((s) => s.folderTree);
@@ -107,10 +108,30 @@ function TreeNode({ node, depth, onPlay, onRemoveFolder }: Props) {
           {node.folder_id != null && (
             <ContextMenuContent>
               <ContextMenuItem
+                onClick={() => {
+                  const ids = collectFolderTrackIds(node);
+                  void addTracksToQueue(ids, node.name ?? node.path);
+                }}
+              >
+                Add folder to queue
+              </ContextMenuItem>
+              <ContextMenuItem
                 onClick={() => onRemoveFolder(node.folder_id!, node.path)}
                 className="text-destructive focus:text-destructive"
               >
                 Remove
+              </ContextMenuItem>
+            </ContextMenuContent>
+          )}
+          {node.folder_id == null && (
+            <ContextMenuContent>
+              <ContextMenuItem
+                onClick={() => {
+                  const ids = collectFolderTrackIds(node);
+                  void addTracksToQueue(ids, node.name ?? node.path);
+                }}
+              >
+                Add folder to queue
               </ContextMenuItem>
             </ContextMenuContent>
           )}

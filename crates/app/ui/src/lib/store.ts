@@ -14,7 +14,14 @@ import type {
   YearRow,
 } from "./types";
 
-export type ViewKey = "tracks" | "albums" | "artists" | "genres" | "years" | "folders";
+export type ViewKey =
+  | "tracks"
+  | "albums"
+  | "artists"
+  | "genres"
+  | "years"
+  | "folders"
+  | "queue";
 
 export type TracksMode = "icons" | "list";
 export type AlbumsMode = "icons" | "list";

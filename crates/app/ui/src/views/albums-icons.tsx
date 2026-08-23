@@ -1,6 +1,13 @@
 import { Card } from "@/components/ui/card";
 import { AlbumCover } from "@/components/album-cover";
 import { useStore } from "@/lib/store";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { addAlbumToQueue } from "@/lib/queue-actions";
 
 export function AlbumsIcons() {
   const items = useStore((s) => s.albumsList);
@@ -15,21 +22,34 @@ export function AlbumsIcons() {
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
       {items.map((a) => (
-        <Card
-          key={a.id}
-          className="cursor-pointer overflow-hidden transition-colors hover:border-primary"
-          onDoubleClick={() => selectAlbum(a.id)}
-        >
-          <AlbumCover albumId={a.id} className="aspect-square w-full" />
-            <div className="p-3">
-              <div className="truncate font-semibold">{a.title}</div>
-              <div className="truncate text-xs text-muted-foreground">
-                {[a.artist_name, `${a.track_count} tracks`]
-                  .filter(Boolean)
-                  .join(" — ")}
+        <ContextMenu key={a.id}>
+          <ContextMenuTrigger asChild>
+            <Card
+              className="cursor-pointer overflow-hidden transition-colors hover:border-primary"
+              onDoubleClick={() => selectAlbum(a.id)}
+            >
+              <AlbumCover albumId={a.id} className="aspect-square w-full" />
+              <div className="p-3">
+                <div className="truncate font-semibold">{a.title}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {[a.artist_name, `${a.track_count} tracks`]
+                    .filter(Boolean)
+                    .join(" — ")}
+                </div>
               </div>
-            </div>
-        </Card>
+            </Card>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onClick={() => selectAlbum(a.id)}>
+              Open
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => void addAlbumToQueue(a.id, a.title)}
+            >
+              Add album to queue
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       ))}
     </div>
   );

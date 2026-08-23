@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/context-menu";
 import * as ipc from "@/lib/ipc";
 import { useStore } from "@/lib/store";
+import { addTracksToQueue } from "@/lib/queue-actions";
 
 type Props = {
   children: ReactNode;
@@ -36,12 +37,15 @@ export function TrackContextMenu({
             setNowPlaying(trackTitle, trackArtist);
             setNowPlayingTrackId(trackId);
             setLyricsTrackId(trackId);
-            ipc.audioPlay(trackId).catch(console.error);
-          }}
-        >
-          Play
-        </ContextMenuItem>
-        <ContextMenuItem onClick={onEdit}>Edit…</ContextMenuItem>
+          ipc.audioPlay(trackId).catch(console.error);
+        }}
+      >
+        Play
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => void addTracksToQueue([trackId])}>
+        Add to queue
+      </ContextMenuItem>
+      <ContextMenuItem onClick={onEdit}>Edit…</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );

@@ -110,5 +110,14 @@ export type FolderRow = {
 export type PlayerSnapshot = {
   state: string;
   current: string | null;
-  next_prepared: string | null;
+  position_secs: number;
+  total_secs: number;
+};
+
+export type QueueItem = {
+  index: number;
+  track_id: number;
+  title: string;
+  artist_name: string | null;
+  is_current: boolean;
 };

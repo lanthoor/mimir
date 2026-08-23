@@ -11,6 +11,7 @@ import type {
   LibraryStatus,
   LyricsPayload,
   PlayerSnapshot,
+  QueueItem,
   TrackPatch,
   TrackRow,
   YearRow,
@@ -98,6 +99,25 @@ export const audioStop = () => invoke<void>("audio_stop");
 export const audioNext = () => invoke<void>("audio_next");
 
 export const audioPrevious = () => invoke<void>("audio_previous");
+
+export const audioQueueEnqueueMany = (trackIds: number[]) =>
+  invoke<number[]>("audio_queue_enqueue_many", { trackIds });
+
+export const audioPlayAndEnqueueMany = (trackIds: number[]) =>
+  invoke<number[]>("audio_play_and_enqueue_many", { trackIds });
+
+export const audioQueueRemoveAt = (index: number) =>
+  invoke<void>("audio_queue_remove_at", { index });
+
+export const audioQueueMove = (from: number, to: number) =>
+  invoke<void>("audio_queue_move", { from, to });
+
+export const audioQueuePlayAt = (index: number) =>
+  invoke<void>("audio_queue_play_at", { index });
+
+export const audioQueueClear = () => invoke<void>("audio_queue_clear");
+
+export const audioQueueGet = () => invoke<QueueItem[]>("audio_queue_get");
 
 export const audioPlayerSnapshot = () =>
   invoke<PlayerSnapshot | null>("audio_player_snapshot");

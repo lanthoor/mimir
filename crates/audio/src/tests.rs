@@ -1,4 +1,7 @@
 //! Tests for the audio decoder + transport.
+//! Single-letter bindings (`a`/`b`/`c`/`p`/`h`/`q`) follow the existing
+//! test style in this file.
+#![allow(clippy::many_single_char_names)]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -232,7 +235,8 @@ fn player_play_command_transitions_to_playing() {
 
     let p = Player::new();
     let h = p.handle();
-    h.send(PlayerCommand::Play(path.clone())).expect("send");
+    h.send(PlayerCommand::Play(path.clone(), None))
+        .expect("send");
 
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
@@ -256,11 +260,14 @@ fn player_pause_resume_stop_round_trip() {
     }
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("sine.wav");
-    write_tiny_wav(&path, 200);
+    // 8000 samples @ 8 kHz = a full second — long enough that the ~25 ms
+    // worker poll can't finish it before `Pause` is observed.
+    write_tiny_wav(&path, 8_000);
 
     let p = Player::new();
     let h = p.handle();
-    h.send(PlayerCommand::Play(path.clone())).expect("send");
+    h.send(PlayerCommand::Play(path.clone(), None))
+        .expect("send");
     wait_for(&p, |s| s.state == TransportState::Playing);
 
     h.send(PlayerCommand::Pause).expect("send");
@@ -281,7 +288,8 @@ fn player_play_missing_file_records_failure() {
     let p = Player::new();
     let h = p.handle();
     let path = PathBuf::from("/tmp/does-not-exist.wav");
-    h.send(PlayerCommand::Play(path.clone())).expect("send");
+    h.send(PlayerCommand::Play(path.clone(), None))
+        .expect("send");
 
     // Decode fails: state should end up Stopped, with the path recorded.
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -327,15 +335,285 @@ fn player_stop_clears_current_then_play_resets() {
 
     let p = Player::new();
     let h = p.handle();
-    h.send(PlayerCommand::Play(a.clone())).expect("send");
+    h.send(PlayerCommand::Play(a.clone(), None)).expect("send");
     wait_for(&p, |s| s.current == Some(a.clone()));
     h.send(PlayerCommand::Stop).expect("send");
     wait_for(&p, |s| {
         s.state == TransportState::Stopped && s.current.is_none()
     });
 
-    h.send(PlayerCommand::Play(b.clone())).expect("send");
+    h.send(PlayerCommand::Play(b.clone(), None)).expect("send");
     wait_for(&p, |s| s.current == Some(b.clone()));
+}
+
+/// `Enqueue` appends to the pending queue without touching playback state.
+/// No audio device required — nothing starts.
+#[cfg(feature = "output")]
+#[test]
+fn queue_enqueue_appends_pending_without_playing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Enqueue(a.clone(), None))
+        .expect("send");
+    h.send(PlayerCommand::Enqueue(b.clone(), None))
+        .expect("send");
+
+    // Give the worker a moment to process both commands.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut q = p.queue_view();
+    while q.tracks != vec![a.clone(), b.clone()] && std::time::Instant::now() <= deadline {
+        q = p.queue_view();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(q.tracks, vec![a, b], "list must hold both in order");
+    assert_eq!(q.playhead, Some(0), "first track is the playhead");
+    assert_eq!(p.snapshot().state, TransportState::Stopped);
+}
+
+/// `RemoveAt` drops a pending entry by index, splicing the rest.
+#[cfg(feature = "output")]
+#[test]
+fn queue_remove_at_splices() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    let c = dir.path().join("c.wav");
+
+    let p = Player::new();
+    let h = p.handle();
+    for path in [&a, &b, &c] {
+        h.send(PlayerCommand::Enqueue((*path).clone(), None))
+            .expect("send");
+    }
+    h.send(PlayerCommand::RemoveAt(1)).expect("send");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut q = p.queue_view();
+    while q.tracks != vec![a.clone(), c.clone()] && std::time::Instant::now() <= deadline {
+        q = p.queue_view();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(q.tracks, vec![a, c], "mid entry must be removed");
+}
+
+/// `Move` reorders pending entries (splice semantics).
+#[cfg(feature = "output")]
+#[test]
+fn queue_move_reorders() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    let c = dir.path().join("c.wav");
+
+    let p = Player::new();
+    let h = p.handle();
+    for path in [&a, &b, &c] {
+        h.send(PlayerCommand::Enqueue((*path).clone(), None))
+            .expect("send");
+    }
+    h.send(PlayerCommand::Move { from: 2, to: 0 })
+        .expect("send");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut q = p.queue_view();
+    while q.tracks != vec![c.clone(), a.clone(), b.clone()] && std::time::Instant::now() <= deadline
+    {
+        q = p.queue_view();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(q.tracks, vec![c, a, b], "c must move to the front");
+}
+
+/// `Play` replaces any pending queue with the single new track.
+#[cfg(feature = "output")]
+#[test]
+fn play_replaces_pending_queue() {
+    if !audio_device_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    let c = dir.path().join("c.wav");
+    write_tiny_wav(&c, 2_000);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Enqueue(a, None)).unwrap();
+    h.send(PlayerCommand::Enqueue(b, None)).unwrap();
+    h.send(PlayerCommand::Play(c.clone(), None)).expect("send");
+
+    // After Play, the queue is exactly [c] with c current.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let q = p.queue_view();
+        if q.tracks == vec![c.clone()] && q.playhead == Some(0) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "Play did not reset the queue; got {q:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// When a track finishes, the worker rolls over to the next pending track
+/// automatically (this is the track-end advance). Requires a device:
+/// both files are tiny so playback is a few ms each.
+#[cfg(feature = "output")]
+#[test]
+fn worker_advances_to_next_when_track_finishes() {
+    if !audio_device_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    // 200 samples @ 8 kHz ≈ 25 ms of audio.
+    write_tiny_wav(&a, 200);
+    write_tiny_wav(&b, 200);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(a.clone(), None)).expect("send");
+    h.send(PlayerCommand::Enqueue(b.clone(), None))
+        .expect("send");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let s = p.snapshot();
+        if s.current == Some(b.clone()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "never rolled over to the next track; last snapshot {s:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // The list is a persistent playlist — both tracks must still be present
+    // (nothing is popped/consumed).
+    assert_eq!(
+        p.queue_view().tracks,
+        vec![a, b],
+        "list must not shrink on advance"
+    );
+    assert_eq!(
+        p.queue_view().playhead,
+        Some(1),
+        "playhead should be on track 2"
+    );
+}
+
+/// `Stop` halts playback but must NOT shrink the playlist or drop the
+/// playhead — the list stays as a persistent record of what was queued.
+#[cfg(feature = "output")]
+#[test]
+fn stop_preserves_playlist_and_playhead() {
+    if !audio_device_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    write_tiny_wav(&a, 8_000);
+    write_tiny_wav(&b, 8_000);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(a.clone(), None)).expect("send");
+    h.send(PlayerCommand::Enqueue(b.clone(), None))
+        .expect("send");
+    wait_for(&p, |s| s.state == TransportState::Playing);
+
+    h.send(PlayerCommand::Stop).expect("send");
+    wait_for(&p, |s| s.state == TransportState::Stopped);
+
+    assert_eq!(
+        p.queue_view().tracks,
+        vec![a, b],
+        "playlist must not shrink on Stop"
+    );
+    assert_eq!(
+        p.queue_view().playhead,
+        Some(0),
+        "playhead must be preserved"
+    );
+}
+
+/// Circular wrap: when the LAST track ends, the FIRST starts again.
+#[cfg(feature = "output")]
+#[test]
+fn worker_wraps_around_to_first() {
+    if !audio_device_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    let b = dir.path().join("b.wav");
+    write_tiny_wav(&a, 200);
+    write_tiny_wav(&b, 200);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(a.clone(), None)).expect("send");
+    h.send(PlayerCommand::Enqueue(b.clone(), None))
+        .expect("send");
+
+    // Phase 1: a finishes → advance to b (playhead 1).
+    wait_for(&p, |s| s.current == Some(b.clone()));
+    // Phase 2: b finishes → wrap to a (playhead 0) again.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let q = p.queue_view();
+        let s = p.snapshot();
+        if q.playhead == Some(0) && s.current == Some(a.clone()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "did not wrap back to the first track; view {q:?}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// `ClearQueue` stops playback and empties the queue.
+#[cfg(feature = "output")]
+#[test]
+fn clear_queue_stops_and_empties() {
+    if !audio_device_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a.wav");
+    write_tiny_wav(&a, 2_000);
+
+    let p = Player::new();
+    let h = p.handle();
+    h.send(PlayerCommand::Play(a.clone(), None)).expect("send");
+    h.send(PlayerCommand::Enqueue(a.clone(), None))
+        .expect("send");
+    h.send(PlayerCommand::ClearQueue).expect("send");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let s = p.snapshot();
+        let q = p.queue_view();
+        if s.state == TransportState::Stopped && s.current.is_none() && q.tracks.is_empty() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "ClearQueue did not converge; snap {s:?} queue {q:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -359,27 +637,6 @@ fn apply_gain_db_inplace_scales_and_clips() {
     assert!((samples[0] - 0.997_65).abs() < 1e-3, "got {}", samples[0]);
     assert!((samples[1] + 0.997_65).abs() < 1e-3);
     assert!((samples[2] - 1.0).abs() < 1e-6, "0.9 * 2 must clip to 1.0");
-}
-
-#[cfg(feature = "output")]
-#[test]
-fn prepare_next_decodes_into_side_buffer() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let wav = tmp.path().join("a.wav");
-    write_sine_wav(&wav, 4_096, 8_000);
-
-    let player = Player::new();
-    let h = player.handle();
-
-    h.send(PlayerCommand::PrepareNext(wav.clone()))
-        .expect("send");
-    wait_for(&player, |s| s.next_prepared == Some(wav.clone()));
-    let snap = player.snapshot();
-    assert_eq!(snap.next_prepared.as_ref(), Some(&wav));
-    assert!(
-        snap.current.is_none(),
-        "PrepareNext must not change current"
-    );
 }
 
 #[allow(clippy::cast_precision_loss)]

@@ -470,15 +470,162 @@ pub fn audio_stop(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn audio_next(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    state.send_transport(TransportCommand::Next);
-    Ok(())
+    if state.queue_len() == 0 {
+        return Ok(());
+    }
+    state.queue_next()
 }
 
 #[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn audio_previous(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    state.send_transport(TransportCommand::Previous);
-    Ok(())
+    if state.queue_len() == 0 {
+        return Ok(());
+    }
+    state.queue_previous()
+}
+
+/// Queue item as rendered by the UI: the currently playing track (index 0)
+/// first, then the pending ones. `is_current` marks the live track.
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct QueueItem {
+    pub index: usize,
+    pub track_id: i64,
+    pub title: String,
+    pub artist_name: Option<String>,
+    pub is_current: bool,
+}
+
+/// Full queued track list from the worker's point of view. Index 0 is the
+/// currently playing track (when one is).
+#[cfg(feature = "tauri")]
+pub fn resolve_queue(
+    state: &crate::state::AppState,
+    lib: &mimir_core::db::Library,
+) -> Result<Vec<QueueItem>, AppError> {
+    let conn = lib.conn()?;
+    let player = state
+        .queue_player()
+        .ok_or_else(|| AppError::Internal("no player".into()))?;
+    let view = player.queue_view();
+    let playhead = view.playhead;
+    let mut items: Vec<QueueItem> = Vec::new();
+    for (i, path) in view.tracks.into_iter().enumerate() {
+        let path_str = path.display().to_string();
+        // Same join shape as the read-side query layer: the track's artist
+        // is reached via its album's album-artist, not a direct column.
+        let row: Option<(i64, Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT t.id, t.title, ar.name \
+                 FROM track t \
+                 LEFT JOIN album a  ON a.id  = t.album_id \
+                 LEFT JOIN artist ar ON ar.id = a.album_artist_id \
+                 WHERE t.path = ?1 \
+                 LIMIT 1",
+                [path_str.clone()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .ok();
+        if let Some((id, title, artist)) = row {
+            items.push(QueueItem {
+                index: i,
+                track_id: id,
+                title: title.unwrap_or_else(|| {
+                    std::path::Path::new(&path_str)
+                        .file_name()
+                        .map_or_else(|| path_str.clone(), |s| s.to_string_lossy().into_owned())
+                }),
+                artist_name: artist,
+                is_current: playhead == Some(i),
+            });
+        }
+    }
+    Ok(items)
+}
+
+/// Append the given track ids to the END of the queue. When nothing is
+/// playing yet the first one starts.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_queue_enqueue_many(
+    state: tauri::State<'_, AppState>,
+    track_ids: Vec<i64>,
+) -> Result<Vec<i64>, AppError> {
+    state.queue_tracks(track_ids)
+}
+
+/// Start playback with the first id and queue the rest — one atomic
+/// command (no Play→Enqueue race).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_play_and_enqueue_many(
+    state: tauri::State<'_, AppState>,
+    track_ids: Vec<i64>,
+) -> Result<Vec<i64>, AppError> {
+    state.play_and_enqueue(track_ids)
+}
+
+/// Remove the track at `index` (0 = the currently playing track; 1..n =
+/// pending). Refuses index 0 — remove the current track by stopping.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_queue_remove_at(
+    state: tauri::State<'_, AppState>,
+    index: usize,
+) -> Result<(), AppError> {
+    state.queue_remove_at(index)
+}
+
+/// Reorder the queue (both indices include the current track).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_queue_move(
+    state: tauri::State<'_, AppState>,
+    from: usize,
+    to: usize,
+) -> Result<(), AppError> {
+    state.queue_move(from, to)
+}
+
+/// Jump playback to the track at `index` (0 = current, 1 = next…).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_queue_play_at(
+    state: tauri::State<'_, AppState>,
+    index: usize,
+) -> Result<(), AppError> {
+    state.queue_play_at(index)
+}
+
+/// Stop and drop the entire queue.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_queue_clear(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    state.queue_clear()
+}
+
+/// The queue as currently held by the worker. Empty when no player has
+/// been created yet (nothing has ever been added or played).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn audio_queue_get(state: tauri::State<'_, AppState>) -> Result<Vec<QueueItem>, AppError> {
+    #[cfg(feature = "output")]
+    {
+        if state.queue_player().is_none() {
+            return Ok(Vec::new());
+        }
+        let lib = state.library()?;
+        if lib.conn().is_err() {
+            return Ok(Vec::new());
+        }
+        resolve_queue(&state, &lib)
+    }
+    #[cfg(not(feature = "output"))]
+    {
+        let _ = state;
+        Ok(Vec::new())
+    }
 }
 
 /// Snapshot of the live audio player — `None` when the `output` feature
@@ -488,7 +635,8 @@ pub fn audio_previous(state: tauri::State<'_, AppState>) -> Result<(), AppError>
 pub struct PlayerSnapshotOut {
     pub state: String,
     pub current: Option<String>,
-    pub next_prepared: Option<String>,
+    pub position_secs: f32,
+    pub total_secs: f32,
 }
 
 #[cfg(feature = "tauri")]
@@ -506,7 +654,8 @@ impl From<mimir_audio::PlayerSnapshot> for PlayerSnapshotOut {
         Self {
             state: format!("{:?}", s.state),
             current: s.current.as_ref().map(|p| p.display().to_string()),
-            next_prepared: s.next_prepared.as_ref().map(|p| p.display().to_string()),
+            position_secs: s.position_secs,
+            total_secs: s.total_secs,
         }
     }
 }
