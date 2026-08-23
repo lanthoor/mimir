@@ -21,31 +21,31 @@ flowchart LR
     end
 
     subgraph CORE[Rust Core]
-        W[File Watcher]
-        S[Scanner<br/>worker pool]
-        M[Metadata Extractor]
-        FP[Fingerprinter]
-        E[Enrichment Service<br/>MusicBrainz · AcoustID · CAA · Discogs]
+        W[File Watcher<br/>notify]
+        S[Scanner<br/>std thread + mpsc]
+        M[Metadata Extractor<br/>lofty]
         DB[(SQLite + FTS5<br/>WAL)]
-        ART[Cover Art Cache]
-        PL[Playlist Engine<br/>static + smart]
-        SC[Scrobble Service<br/>Last.fm · ListenBrainz]
+        ART[Cover Art<br/>mimircover:// protocol]
+    end
+
+    subgraph CORE_FUT[Tier 4 (not yet implemented)]
+        FP[Fingerprinter<br/>Chromaprint]
+        E[Enrichment<br/>MusicBrainz · AcoustID · CAA]
     end
 
     subgraph AUDIO[Audio Engine]
-        DEC[Decoder]
-        DSP[DSP Pipeline<br/>ReplayGain · EQ · Crossfade]
-        OUT[Output Backend]
+        DEC[Decoder<br/>symphonia]
+        RG[ReplayGain volume<br/>applied on track start]
+        OUT[Output<br/>rodio/cpal]
         MAC[CoreAudio]
-        LIN[ALSA / PulseAudio / PipeWire]
+        LIN[ALSA / Pulse / PipeWire]
         WIN[WASAPI]
     end
 
     subgraph UI[Desktop UI]
-        BROWSE[Library Browsing]
+        BROWSE[Library Browsing<br/>React views]
         PLAY[Now Playing]
-        EDIT[Tag Editor]
-        SET[Settings]
+        EDIT[Track Editor<br/>DB-only]
     end
 
     F1 --> W
@@ -53,19 +53,15 @@ flowchart LR
     W --> S
     S --> M
     M --> DB
-    M --> FP
-    FP --> E
-    E --> DB
-    E --> ART
+    M -.-> ART
+    M -.-> FP -.-> E -.-> DB
     DB --> BROWSE
     DB --> PLAY
-    PL --> DB
-    DEC --> DSP --> OUT
+    DEC --> RG --> OUT
     OUT --> MAC
     OUT --> LIN
     OUT --> WIN
     DB --> DEC
-    PLAY --> SC
 ```
 
 ### Process Model
@@ -73,17 +69,20 @@ flowchart LR
 ```mermaid
 flowchart TB
     MAIN[Tauri Main Process<br/>Rust]
-    WEB[WebView Renderer<br/>UI]
-    POOL[Tokio Worker Pool]
-    AUDIO[Audio Thread]
+    WEB[WebView Renderer<br/>React UI]
+    SCAN[Scan worker thread<br/>walk · hash · ingest]
+    AUDIO[Audio / player thread<br/>rodio]
     DB[(SQLite WAL)]
 
-    MAIN <-->|IPC| WEB
-    MAIN --> POOL
+    MAIN <-->|IPC invoke| WEB
+    MAIN --> SCAN
     MAIN --> AUDIO
-    POOL <--> DB
-    AUDIO -->|commands| DB
+    SCAN <--> DB
+    AUDIO <--> DB
 ```
+
+- One Tauri main process (Rust), one WebView renderer (React), one scan-worker thread (`std::thread` + `mpsc`), and the audio worker (`rodio`) — all share the SQLite DB.
+- No async runtime; workers are plain OS threads.
 
 ---
 
@@ -154,21 +153,20 @@ erDiagram
 
 | Module | Responsibility |
 |--------|----------------|
-| `core::watcher` | Cross-platform FS events |
+| `core::watcher` | Cross-platform FS events (`notify` + debouncer) |
 | `core::scanner` | Walk dirs, hash, dedupe |
-| `core::metadata` | Tag extraction & heuristics |
-| `core::fingerprint`| Chromaprint generation |
-| `core::enrich` | MusicBrainz, AcoustID, CAA, Discogs |
-| `core::db` | SQLite schema, migrations, FTS |
-| `core::playlist` | Static + smart playlist evaluation |
-| `audio::decode` | Frame-accurate decode |
-| `audio::dsp` | ReplayGain, crossfade, EQ, resample |
-| `audio::output` | OS backends |
-| `scrobble` | Last.fm / ListenBrainz |
-| `app` | Tauri host, IPC, updater |
-| `ui` | Web frontend inside Tauri |
+| `core::metadata` | Tag extraction (`lofty`) & heuristics; cover/lyrics sidecars |
+| `core::db` | SQLite schema, migrations, FTS5, cover art, lyrics |
+| `core::query` | Read-side views (tracks/albums/artists/genres/years/folders/search) |
+| `telemetry` | File-rotating logger (`crates/telemetry`) |
+| `audio::decode` | Decode to PCM (`symphonia`) |
+| `audio::gain` | ReplayGain dB → linear volume |
+| `audio::eq` | EQ prototype (not yet wired into playback) |
+| `audio::player` | Playback queue + transport (`rodio`, gated on `output`) |
+| `app` | Tauri host, IPC, `mimircover://` protocol |
+| `ui` | React + TypeScript frontend inside Tauri (Vite/Zustand/shadcn) |
 
-Concrete crate candidates are listed in [Technical Decisions](TechnicalDecisions.md) (none are locked until spike validation; see [spike plan](TechnicalDecisions.md#spike-plan)).
+Not yet implemented (target design, Tiers 2–5): `core::fingerprint` / `core::enrich` (Chromaprint, MusicBrainz, AcoustID, Cover Art Archive), `core::playlist` (smart rules), `audio::dsp` (crossfade, parametric EQ, resampling), scrobble. See the [feature checklist](Plan.md#feature-checklist).
 
 ---
 
@@ -193,7 +191,7 @@ sequenceDiagram
     Note over W,DB: Watcher keeps streaming events;<br/>periodic reconciliation re-scans diffs.
 ```
 
-### Ingestion Sketch (illustrative — not locked)
+### Ingestion Sketch (Tier 4 design, not implemented)
 
 ```rust
 pub struct IngestEvent {
@@ -229,24 +227,19 @@ impl ScanJob {
 }
 ```
 
-### Watcher Skeleton (illustrative)
+### Watcher (actual, simplified)
 
 ```rust
-use notify::{Watcher, RecursiveMode, EventKind};
+use std::sync::mpsc;
+use std::thread;
 
-pub fn spawn_watcher(root: PathBuf, tx: mpsc::Sender<IngestEvent>) {
-    tokio::task::spawn_blocking(move || {
-        let mut w = notify_debouncer_full::new_debouncer(
-            Duration::from_millis(500), None, move |res| {
-                if let Ok(events) = res {
-                    for e in events { let _ = tx.blocking_send(to_ingest(e)); }
-                }
-            }
-        )?;
-        w.watcher().watch(&root, RecursiveMode::Recursive)?;
-        std::thread::park(); // keep alive
-        Ok::<(), anyhow::Error>(())
-    });
+fn spawn_watcher(root: &Path, rx: &mut mpsc::Receiver<IngestEvent>) {
+    let mut deb = notify_debouncer_full::new_debouncer(Duration::from_millis(500), None, |res| {
+        // send IngestEvent into the scan thread's channel
+    }).expect("watcher");
+    deb.watcher().watch(root, RecursiveMode::Recursive).expect("watch");
+    // park: keep the debouncer alive
+    loop { let _ = rx.recv_timeout(Duration::from_secs(1)); }
 }
 ```
 
@@ -359,7 +352,7 @@ flowchart LR
     OUT --> SP[Speakers / DAC]
 ```
 
-### Audio Engine Skeleton (illustrative)
+### Audio Engine (Tier 2 design, not implemented)
 
 ```rust
 pub struct AudioEngine {
@@ -410,7 +403,7 @@ stateDiagram-v2
 
 ---
 
-## Playlists
+## Playlists (Tier 3 design, not implemented)
 
 ```mermaid
 flowchart TB
@@ -422,7 +415,7 @@ flowchart TB
     RES --> Q[Playback Queue]
 ```
 
-### Smart Playlist Rules Schema (illustrative)
+### Smart Playlist Rules Schema (Tier 3 design)
 
 ```rust
 #[derive(Serialize, Deserialize)]
@@ -460,7 +453,7 @@ fn matches(t: &Track, c: &Condition) -> bool {
 
 ---
 
-## Enrichment
+## Enrichment (Tier 4 design, not implemented)
 
 ```mermaid
 sequenceDiagram
@@ -482,58 +475,55 @@ sequenceDiagram
 
 ---
 
-## UI (Tauri host + Web frontend)
+## UI (Tauri host + React frontend)
 
 ```mermaid
 flowchart LR
-    subgraph Pages
-        LIB[Library]
+    subgraph Views
+        TRK[Tracks]
         ALB[Albums]
         ART[Artists]
-        PL[Playlists]
-        NP[Now Playing]
-        SET[Settings]
+        GEN[Genres]
+        YRS[Years]
+        FOL[Folders]
     end
 
     subgraph State
-        Z[UI state store]
-        RQ[Query cache<br/>IPC bindings]
+        Z[Zustand store<br/>src/lib/store.ts]
+        IPC[typed invoke() wrappers<br/>src/lib/ipc.ts]
     end
 
-    LIB --> RQ --> Z
-    NP --> Z
-    PL --> RQ
+    TRK --> IPC --> Z
+    ALB --> IPC
+    ART --> IPC
+    GEN --> IPC
+    YRS --> IPC
+    FOL --> IPC
 ```
 
-- IPC via Tauri `invoke()` commands; binary payloads streamed over Tauri channels.
-- Virtualized lists for libraries ≥ 10k rows.
-- Native menu + global hotkeys for transport.
+- Built with Vite + TypeScript; Tailwind + shadcn/ui components.
+- IPC via Tauri `invoke()` commands (typed wrappers in `src/lib/ipc.ts`); album cover bytes streamed over the `mimircover://` custom protocol rather than IPC.
+- Not yet implemented: virtualized lists for ≥ 10k rows, native menu + global transport hotkeys, Playlists/Settings pages (see the [feature checklist](Plan.md#feature-checklist)).
 
 ---
 
 ## Observability & Errors
 
-```rust
-#[derive(thiserror::Error, Debug)]
-pub enum AppError {
-    #[error("io: {0}")]            Io(#[from] std::io::Error),
-    #[error("db: {0}")]            Db(#[from] rusqlite::Error),
-    #[error("decode: {0}")]        Decode(String),
-    #[error("metadata: {0}")]      Metadata(String),
-    #[error("enrich: {0}")]        Enrich(String),
-    #[error("audio output: {0}")]  Audio(String),
-}
+`crates/app/src/error.rs` defines the single IPC error type (serializable so the frontend gets a structured failure, not a panic):
 
-pub fn init_tracing() {
-    use tracing_subscriber::{layer::SubscriberExt, EnvFilter};
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .with(tracing_subscriber::fmt::layer().with_target(false))
-        .init();
+```rust
+#[derive(Debug, Error, Serialize)]
+#[serde(tag = "kind", content = "message")]
+pub enum AppError {
+    #[error("io: {0}")]            Io(String),
+    #[error("sqlite: {0}")]        Sqlite(String),
+    #[error("decode: {0}")]        Decode(String),
+    #[error("path not found: {0}")] PathNotFound(String),
+    #[error("internal: {0}")]       Internal(String),
 }
 ```
 
-Log levels routed per module; enrichment/scan errors persisted to a `db_event_log` table for retry.
+Logging is handled by `crates/telemetry` (mimir-telemetry): a file-rotating logger writing to `$XDG_STATE_HOME/var/log/mimir.log` (5 MiB rotation, 3 generations). The webview can't reach the file logger directly, so its `console.*` calls are bridged through the `app_log` IPC command. Scan/ingest progress is surfaced to the UI via `scan:done` / `scan:error` events (there is no `db_event_log` table).
 
 ---
 
@@ -541,24 +531,13 @@ Log levels routed per module; enrichment/scan errors persisted to a `db_event_lo
 
 ```mermaid
 flowchart LR
-    CI[CI] --> CARGO[cargo build --release]
-    CARGO --> WIN[Windows MSI<br/>tauri build]
-    CARGO --> MAC[macOS .app/.dmg<br/>universal]
-    CARGO --> LIN[Linux AppImage<br/>.deb · Flatpak]
-    WIN --> SIGN[Sign + Notarize]
-    MAC --> SIGN
-    SIGN --> REL[Release]
-    REL --> UPD[In-App Updater]
+    CI[release.yml] --> CARGO[cargo build --release]
+    CARGO --> LIN[Linux AppImage<br/>.deb]
+    CARGO --> MAC[macOS .dmg]
+    LIN --> REL[GitHub Release<br/>+ git-cliff changelog]
+    MAC --> REL
 ```
 
-```yaml
-# .github/workflows/release.yml (excerpt)
-- name: Build (windows-latest)
-  run: cargo tauri build --target x86_64-pc-windows-msvc
-- name: Build (macos-latest, universal)
-  run: cargo tauri build --target universal-apple-darwin
-- name: Build (ubuntu-latest)
-  run: cargo tauri build --target x86_64-unknown-linux-gnu
-```
+`.github/workflows/release.yml` builds a Linux (AppImage + .deb) and macOS (.dmg) matrix on a `v*` tag, then publishes them as a GitHub release with a git-cliff changelog.
 
-> **Phase 0 status:** the pipeline currently ships a Linux-only `cargo build --release` artifact from a pure Cargo workspace skeleton (no Tauri yet). See [Plan · Phase 0 — CI Bootstrap](Plan.md#phase-0--ci-bootstrap). The full Tauri matrix (AppImage / .deb / Flatpak / MSI / .dmg) and signing/notarization are deferred to Tier 6.
+> **Current status:** `0.1.0` ships Linux AppImage + .deb and macOS .dmg via `tauri build`; CI also produces a stripped `mimir-linux-x86_64` binary on every push. Windows MSI, Flatpak, signing/notarization, and auto-update are deferred to Tier 6 — see the [feature checklist](Plan.md#feature-checklist).

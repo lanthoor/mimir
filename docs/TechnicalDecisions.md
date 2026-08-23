@@ -34,35 +34,33 @@
   - **Flutter desktop** — rejected: weaker ecosystem for audio metadata + filesystem watchers in Rust.
 - Tauri uses system WebView (WebKit on macOS, WebView2 on Win, WebKitGTK on Linux); keeps the install footprint small.
 
-### UI framework — Candidate
+### UI framework — Locked
 
-- Lean React SPA in Tauri; specifics (state, data layer, styling) are decided below as Candidates and must be spiked.
+- React SPA in Tauri. The pieces below are locked (implemented in `crates/app/ui`).
 
 ---
 
 ## UI framework pieces (spike required)
 
-### Component framework — Candidate
+### Component framework — Locked
 
-- Default candidate: **React**.
-- Considered: Svelte, SolidJS, Vue. Decision pending build-size / DX spike.
+- **React 19** (TypeScript, built with Vite, shadcn/ui components).
+- Considered and dropped: Svelte, SolidJS, Vue.
 
-### State management — Candidate
+### State management — Locked
 
-- Default candidates: local component state + lightweight store; alternatives evaluated:
-  - **Zustand** — small, no boilerplate.
-  - **Redux Toolkit** — rejected for v1 unless scale demands it.
-  - **Jotai / signals** — viable, decide during spike.
+- **Zustand** — single store (`crates/app/ui/src/lib/store.ts`), no boilerplate.
+- Considered and dropped: Redux Toolkit, Jotai / signals.
 
-### Server-state / IPC bridge — Candidate
+### Server-state / IPC bridge — Locked
 
-- Default candidate: **TanStack Query** over Tauri `invoke()` commands.
-- Considered: raw `fetch`-style wrappers, RTK Query.
-- Spike must verify streaming large lists (track/playlists) and binary payload (audio frames) paths.
+- Hand-rolled **typed `invoke()` wrappers** in `crates/app/ui/src/lib/ipc.ts` — one function per Rust `#[tauri::command]`, with typed payloads in `types.ts`. No query layer.
+- Considered and dropped: TanStack Query, RTK Query.
 
-### Styling — Candidate
+### Styling — Locked
 
-- Preference for CSS layers (or vanilla-extract / Tailwind); finalize during spike based on theme-switching needs.
+- **Tailwind CSS** + **shadcn/ui** primitives; `tailwindcss-animate` for motion.
+- Theme switching (light / dark / system) via a small provider + CSS custom properties.
 
 ---
 
@@ -76,14 +74,15 @@
   - **LMDB / sled** — rejected as primary (kept as a possibility for transient caches only).
   - **DuckDB** — considered briefly; SQL only, no FTS5 ergonomics, rejected for primary.
 
-### SQLite access — Candidate
+### SQLite access — Locked
 
-- `rusqlite` (bundled) + `r2d2_sqlite` pool, OR `sqlx`.
-- Decision criterion: ergonomics for prepared-statement reuse and migrations.
+- `rusqlite` (bundled) + `r2d2` / `r2d2_sqlite` pool.
+- Considered and dropped: `sqlx`.
 
-### Migrations — Candidate
+### Migrations — Locked
 
-- `refinery` vs `sqlx::migrate!` vs hand-rolled — pick during spike.
+- Hand-rolled runner in `crates/core/src/db/migrations.rs`, applying `00NN_*.sql` from `crates/core/migrations/` in order on every `Library::open`.
+- Considered and dropped: `refinery`, `sqlx::migrate!`.
 
 ### Search — Locked: SQLite FTS5
 
@@ -94,34 +93,31 @@
 
 ## Filesystem & ingestion
 
-### File watcher — Candidate
+### File watcher — Locked
 
-- `notify` + `notify-debouncer-full` for cross-platform recursive events.
-- Spike must validate behavior on network mounts (SMB/NFS) and removable media.
+- `notify` + `notify-debouncer-full` for cross-platform recursive events (`crates/core/src/watcher/`).
 
-### Directory walk — Candidate
+### Directory walk — Locked
 
-- `walkdir` (parallel scan via Rayon).
-- Alternative: `jwalk` — keep in pocket if walk performance bottlenecks.
+- `walkdir` for the recursive scan (`crates/core/src/scanner/walk.rs`).
+- Considered and dropped: `jwalk`.
 
-### Path/content hashing — Candidate
+### Path/content hashing — Locked
 
-- `blake3` for content hashes; SHA-256 acceptable if any tooling wants it.
-- Dedup key: `(path_hash, mtime_ns, size_bytes)` to handle rename + replace cheaply.
+- `blake3` 32-byte content hash, dedup key `(path_hash, mtime_ns, size_bytes)`.
 
-### Async runtime — Candidate
+### Async runtime — not used
 
-- `tokio` for the worker pool.
-- `rayon` for CPU-bound parallel scans (DB writes, hashing).
+- No `tokio` / `rayon`. Scan workers and the audio worker are plain `std::thread::spawn` + `std::sync::mpsc` channels. Add an async runtime only if profiling shows we need it.
 
 ---
 
 ## Metadata extraction
 
-### Primary library — Candidate
+### Primary library — Locked
 
 - `lofty` — broad format coverage (ID3v1/v2, Vorbis, APE, MP4), maintained, Rust-native.
-- Alternatives:
+- Considered and dropped:
   - `id3` (ID3-only) — rejected: too narrow.
   - `metaflac` + `vorbis-meta` wrappers — rejected: process model and tagging write-back would suffer.
 
@@ -130,10 +126,9 @@
 - Pattern: `<Artist>/<Album>/<TrackNo> - <Title>.<ext>` with sensible fallbacks.
 - Per-locale handling; documented test corpus in `tests/fixtures/`.
 
-### Fingerprinting — Candidate
+### Fingerprinting — Deferred
 
-- `chromaprint-rs` (FFI to libchromaprint) to compute AcoustID-compatible fingerprints.
-- Build-time feature to disable for binaries that don't want the FFI footprint.
+- `chromaprint-rs` (FFI to libchromaprint) is the planned approach; not implemented yet (Tier 4).
 
 ---
 
@@ -141,43 +136,41 @@
 
 | Provider | Decision | Notes |
 |----------|----------|-------|
-| AcoustID | Candidate (locked-in concept) | Fingerprint → recording ID resolution. |
-| MusicBrainz | Candidate | Source of truth for MBIDs, release grouping. |
-| Cover Art Archive | Candidate | Primary source for cover art. |
-| Discogs | Candidate | Optional opt-in for richer releases/tags. |
-| Last.fm | Candidate | Bio, similar artists; also powers scrobbling. |
+| AcoustID | Deferred (Tier 4) | Fingerprint → recording ID resolution. |
+| MusicBrainz | Deferred (Tier 4) | Source of truth for MBIDs, release grouping. |
+| Cover Art Archive | Deferred (Tier 4) | Primary source for cover art. |
+| Discogs | Deferred (Tier 4) | Optional opt-in for richer releases/tags. |
+| Last.fm | Deferred (Tier 4) | Bio, similar artists; also powers scrobbling. |
 
-- All providers behind a **pluggable trait** so missing rate limits / downtime can't block playback.
-- HTTP client candidates: `reqwest` (async), `ureq` (sync, lighter). Decision during spike.
+- All providers behind a **pluggable trait** so missing rate limits / downtime can't block playback (Tier 4).
+- HTTP client candidate when implemented: `reqwest` (async) or `ureq` (sync, lighter).
 
 ---
 
 ## Audio engine
 
-### Decoder — Candidate
+### Decoder — Locked
 
-- `symphonia` — pure-Rust, broad format support, frame-accurate output.
-- Considered: `ffmpeg-next` (libav) — rejected for v1 due to licensing + binary-size cost; revisit if Symphonia can't cover a required format.
+- `symphonia` — pure-Rust, broad format support (`crates/audio/src/decode.rs`).
+- Considered and dropped: `ffmpeg-next` (libav) — licensing + binary-size cost.
 
-### DSP — Candidate
+### DSP — Partially locked
 
-- `rubato` for resampling.
-- `realfft` or `rustfft` for EQ (FFT-based parametric EQ).
-- `eq-rs` (or in-tree biquad cascade) for the EQ coefficient math.
-- ReplayGain via `vgmstream`-style RVA / RG tag parsing; no FFI.
+- ReplayGain: read from tags, applied to player volume (`audio/gain.rs`, `audio/player.rs`).
+- Parametric EQ: `audio/eq.rs` prototype exists; not wired into playback (Tier 2).
+- Resampling: rodio does it on the fly — `rubato` dropped.
 
-### Audio output (cross-platform) — Candidate
+### Audio output (cross-platform) — Locked
 
-- `cpal` for the unified API.
-- Per-platform backend preferences:
-  - **Linux**: ALSA (low latency) preferred where available; PulseAudio / PipeWire via `cpal`.
-  - **macOS**: CoreAudio via `cpal` (no extra FFI).
-  - **Windows**: WASAPI via `cpal`; WASAPI exclusive mode is a v2 enhancement.
+- **rodio** (pulls `cpal` under the hood) behind the `output` feature (`crates/audio/src/player.rs`).
+- Per-platform backends come from rodio/cpal:
+  - **Linux**: ALSA / PulseAudio / PipeWire.
+  - **macOS**: CoreAudio.
+  - **Windows**: WASAPI.
 
-### Scrobbling — Candidate
+### Scrobbling — Deferred (Tier 4/6)
 
-- `lastfm-api` (or thin `reqwest` wrapper) for Last.fm.
-- ListenBrainz: thin `reqwest` client.
+- `lastfm-api` (or thin `reqwest` wrapper) for Last.fm; ListenBrainz thin client — not implemented yet.
 
 ---
 
@@ -201,37 +194,34 @@
 - One Tauri main process (Rust), one WebView renderer (UI), plus a Tokio worker pool and an audio thread; all share the SQLite DB.
 - No secondary processes for v1; if download/cache offload becomes heavy, an auxiliary `mimir-helper` binary can be added later.
 
-### IPC — Candidate
+### IPC — Locked
 
-- Tauri `invoke()` for commands; Tauri channels/event bus for streaming large lists and progress.
-- Streaming binary (audio frames) → dedicated `tauri-plugin-fs` or a custom channel — spike it.
+- Tauri `invoke()` for commands; Tauri event bus (`scan:done` / `scan:error`) for scan progress; the `mimircover://` custom protocol streams album cover bytes (no base64 over IPC).
 
 ---
 
 ## Packaging & distribution
 
-### Bundler — Candidate
+### Bundler — Locked
 
-- `tauri build` for MSI (Win), `.dmg` (mac), AppImage/.deb (Linux).
-- Spike to confirm Linux Flatpak readiness (sandbox + filesystem access for watched folders).
+- `tauri build`: AppImage + .deb on Linux, .dmg on macOS (`.github/workflows/release.yml`). MSI and Flatpak still pending (Tier 6).
 
-### Auto-update — Candidate
+### Auto-update — Deferred (Tier 6)
 
-- `tauri-plugin-updater` with signed binary manifest.
+- `tauri-plugin-updater` with signed binary manifest — not implemented yet.
 
-### Code signing — Candidate
+### Code signing — Deferred (Tier 6)
 
-- Apple Developer ID (notarization) and Windows Authenticode EV/OV.
-- Track budget and cert renewal in project ops docs.
+- Apple Developer ID (notarization) and Windows Authenticode — not implemented yet.
 
 ---
 
 ## Observability & errors
 
-### Tracing — Candidate
+### Tracing — Locked
 
-- `tracing` + `tracing-subscriber` for structured logs.
-- Persisted `db_event_log` for retry-eligible error categories.
+- `crates/telemetry` (mimir-telemetry): file-rotating logger writing to `$XDG_STATE_HOME/var/log/mimir.log` (5 MiB rotation, 3 generations). Structured levels + target.
+- No `db_event_log` table; scan/ingest retries are handled in-app, not persisted-as-rows.
 
 ### Error model — Locked concept
 
@@ -250,15 +240,15 @@
 
 ## Spike plan
 
-Each spike ends with one of: **Lock**, **Reject**, **Re-spike**.
+Spikes were run during Tier 0/1 and each item was locked, rejected, or deferred as noted above. The remaining open work tracks the [feature checklist](Plan.md#feature-checklist) rather than this table.
 
-| # | Spike | Decision it unblocks |
+| # | Spiked in Tier 0/1 | Resolution |
 |---|-------|----------------------|
-| S1 | React vs Svelte vs SolidJS build-size + DX on Tauri | UI framework |
-| S2 | Zustand / Jotai / TanStack-Query ergonomics on Tauri | state + data-layer libs |
-| S3 | `notify` on SMB / NFS / ext4 / exFAT | watcher confirm |
-| S4 | `lofty` coverage vs `ffmpeg-next` for ALAC,Opus,AAC | metadata + decoder |
-| S5 | `symphonia` cover-rate for FLAC/MP3/Opus/M4A | decoder |
-| S6 | `cpal` latency + device routing on each OS | audio output strategy |
-| S7 | Chromaprint FFI build matrix on Win/macOS/Linux | fingerprint feature flag |
-| S8 | Tauri updater signing flow | release pipeline |
+| S1 | React vs Svelte vs SolidJS on Tauri | **React** locked |
+| S2 | Zustand / TanStack-Query ergonomics | **Zustand** + plain `invoke` wrappers locked |
+| S3 | `notify` on local + network mounts | **notify + debouncer** locked |
+| S4 | `lofty` coverage vs `ffmpeg-next` | **lofty** locked |
+| S5 | `symphonia` cover-rate for FLAC/MP3/Opus/M4A | **symphonia** locked |
+| S6 | audio backend latency + device routing | **rodio** locked (cpal underneath) |
+| S7 | Chromaprint FFI build matrix | Deferred (Tier 4) |
+| S8 | Tauri updater signing flow | Deferred (Tier 6) | |

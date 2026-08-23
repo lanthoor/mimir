@@ -5,9 +5,9 @@ miss from filenames or a fresh `cargo build` lives here.
 
 ## Layout (Cargo workspace, resolver = "2")
 
-- `crates/core` — `mimir-core`: library model, ingestion pipeline, SQLite (rusqlite + r2d2 pool), watcher, scanner, metadata. Owns `crates/core/migrations/0001_*.sql` .. `0010_*.sql`; run from `Library::open`.
+- `crates/core` — `mimir-core`: library model, ingestion pipeline, SQLite (rusqlite + r2d2 pool), watcher, scanner, metadata. Owns `crates/core/migrations/` (hand-rolled runner, applied from `Library::open`).
 - `crates/audio` — `mimir-audio`: decoder (`decode.rs`), transport state + queue (`transport/`), player (`player.rs`, gated on `output` feature). Pure DSP/queueing, no DB.
-- `crates/app` — `mimir-app`: Tauri v2 host binary. `src/main.rs` calls `mimir_app::run()` (lib.rs); the Tauri builder, `AppState`, IPC handlers (`command.rs`), `error::AppError`, and the `mimircover://` album-cover protocol (lib.rs) live here. UI is `crates/app/ui/`: Vite 6 + React 18 + TypeScript + Tailwind + shadcn/ui (Zustand store in `src/lib/store.ts`, typed IPC in `src/lib/ipc.ts`, views in `src/views/`). Its `package.json` is `crates/app/ui/package.json`; Tauri's `beforeDevCommand`/`beforeBuildCommand` point at it via `cwd: "ui"`.
+- `crates/app` — `mimir-app`: Tauri v2 host binary. `src/main.rs` calls `mimir_app::run()` (lib.rs); the Tauri builder, `AppState`, IPC handlers (`command.rs`), `error::AppError`, and the `mimircover://` album-cover protocol (lib.rs) live here. UI is `crates/app/ui/`: Vite 6 + React 19 + TypeScript + Tailwind + shadcn/ui (Zustand store in `src/lib/store.ts`, typed IPC in `src/lib/ipc.ts`, views in `src/views/`). Its `package.json` is `crates/app/ui/package.json`; Tauri's `beforeDevCommand`/`beforeBuildCommand` point at it via `cwd: "ui"`.
 - `crates/telemetry` — `mimir-telemetry`: file-rotating logger; logs to `$XDG_STATE_HOME/var/log/mimir.log` (falls back to `~/.local/var/log/mimir.log`).
 
 Binaries: `mimir` (host, `crates/app/src/main.rs`). Bundle config: `crates/app/tauri.conf.json` + `crates/app/capabilities/default.json`. Tauri-generated scaffolding under `crates/app/gen/` is gitignored.
@@ -42,7 +42,7 @@ npm ci && npm run lint && npm run build                  # build → crates/app/
 # Dev (Tauri shell + Vite dev server on :1420; beforeDevCommand runs `npm run dev`)
 PATH=/tmp/tauri-cli/bin:$PATH cargo tauri dev --features tauri
 
-# Release bundle (Linux; mirrors .github/workflows/bundling.yml)
+# Release bundle (Linux; mirrors .github/workflows/release.yml)
 cd crates/app/ui && npm ci && cd ../..
 cargo build --release -p mimir-app --features tauri
 cargo install --locked tauri-cli --version "^2.0" --root /tmp/tauri-cli
@@ -53,7 +53,7 @@ PATH=/tmp/tauri-cli/bin:$PATH cargo tauri build --bundles appimage deb
 
 - `mimir-app` default features: `output` (which pulls `mimir-audio/output` → `rodio`). The Tauri shell is gated behind `--features tauri`.
 - `mimir-audio/output` adds `rodio` for the playback queue. Without it, `Player` / `PlayerHandle` don't exist (see `#[cfg(feature = "output")]` in `crates/audio/src/lib.rs`).
-- Without `--features tauri`, `mimir_app::run()` is a no-op stub that prints to stderr — so `cargo check` works on machines without GTK/webkit2gtk system deps. Linux CI installs `libwebkit2gtk-4.1-dev` + webkit/ayatana deps; runtime `.deb` depends on `libwebkit2gtk-4.1-0`.
+- Without `--features tauri`, `mimir_app::run()` is a no-op stub that prints to stderr — so `cargo check` works on machines without GTK/webkit2gtk system deps. Bundling additionally needs `libwebkit2gtk-4.1-dev` + webkit/ayatana deps; the runtime `.deb` depends on `libwebkit2gtk-4.1-0`.
 
 ## Linux build deps (CI installs these)
 
@@ -63,8 +63,8 @@ PATH=/tmp/tauri-cli/bin:$PATH cargo tauri build --bundles appimage deb
 
 - `pr.yml` — PR to `main`. Jobs: `fmt`, `clippy`, `test`, `build`, `ui` (the five required status checks). Concurrency `pr-<n>`, cancel-in-progress.
 - `ci.yml` — push to `main` + manual. Same five checks plus `cargo build --release --bin mimir` → strip → upload `mimir-linux-x86_64` artifact (1 day retention).
-- `ui` jobs: Node 26 (`actions/setup-node`, pinned SHA), `npm ci` → `npm run lint` → `npm run build` in `crates/app/ui`. `bundling.yml` also runs `npm ci` before `cargo tauri build`.
-- `bundling.yml` — manual + push to `main` under `crates/app/**`. Builds AppImage + .deb via `cargo tauri build`.
+- `ui` jobs: Node 26 (`actions/setup-node`, pinned SHA), `npm ci` → `npm run lint` → `npm run build` in `crates/app/ui`.
+- `release.yml` — on `v*` tag (or manual). Matrix Linux (AppImage + .deb) and macOS (.dmg). Runs `npm ci` then `cargo tauri build`, uploads per-OS artifacts, and creates a release with a git-cliff changelog.
 - All third-party GitHub Actions pinned by SHA with `# v<tag>` inline comments. `dtolnay/rust-toolchain` is given an explicit `toolchain: 1.97.1` (do not pin it by SHA in addition — it tracks the Rust release, not the channel).
 - Dependabot weekly for `cargo` (`.github/dependabot.yml`) and `npm` (`/crates/app/ui`); no GitHub-Actions ecosystem entry — bump actions by hand.
 

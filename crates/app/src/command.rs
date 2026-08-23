@@ -1,4 +1,4 @@
-//! IPC commands invoked from the Svelte front-end.
+//! IPC commands invoked from the React front-end.
 
 #[cfg(feature = "tauri")]
 use std::path::{Path, PathBuf};

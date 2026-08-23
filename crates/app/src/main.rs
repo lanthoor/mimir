@@ -1,6 +1,6 @@
 //! Mimir host binary.
 //!
-//! Tier 0 ships a Tauri v2 shell with IPC commands for the Svelte frontend.
+//! Tier 0 ships a Tauri v2 shell with IPC commands for the React frontend.
 //! The actual Tauri builder is wired in `lib.rs`; `main.rs` just calls it.
 
 #![cfg_attr(
