@@ -137,10 +137,10 @@ function FolderIcon({
           onDoubleClick={onOpen}
         >
           <Folder className="h-10 w-10 shrink-0 text-muted-foreground" />
-          <div className="line-clamp-1 w-full break-words text-center text-sm font-semibold">
+          <div className="w-full break-words text-center text-sm font-semibold">
             {node.name ?? basename(node.path)}
           </div>
-          <div className="line-clamp-2 w-full break-words text-center text-xs text-muted-foreground">
+          <div className="w-full break-words text-center text-xs text-muted-foreground">
             {node.path}
           </div>
         </Card>
@@ -186,10 +186,10 @@ function FileIcon({
             title={file.path}
           >
             <Music className="h-10 w-10 text-muted-foreground" />
-            <div className="truncate text-center text-sm font-semibold">
+            <div className="w-full break-words text-center text-sm font-semibold">
               {file.title ?? basename(file.path)}
             </div>
-            <div className="truncate text-center text-xs text-muted-foreground">
+            <div className="w-full break-words text-center text-xs text-muted-foreground">
               {basename(file.path)}
             </div>
           </Card>

@@ -31,8 +31,8 @@ export function ArtistsView() {
         >
           <Music className="h-8 w-8 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
-            <div className="truncate font-semibold">{a.name}</div>
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="break-words font-semibold">{a.name}</div>
+            <div className="break-words text-xs text-muted-foreground">
               {a.track_count} tracks
             </div>
           </div>
