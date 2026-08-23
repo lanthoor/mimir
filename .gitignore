@@ -7,6 +7,11 @@ Cargo.lock.bak
 # Tauri generated scaffolding
 crates/app/gen/
 
+# Node / Vite frontend
+**/node_modules/
+**/dist/
+*.tsbuildinfo
+
 # Editor / OS
 .idea/
 .vscode/

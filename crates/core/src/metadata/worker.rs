@@ -5,13 +5,15 @@ use std::path::Path;
 use rusqlite::Connection;
 use thiserror::Error;
 
-use crate::db::{attach_album_cover, upsert_lyrics};
+use crate::db::{attach_album_cover, upsert_lyrics, Library};
 use crate::scanner::ScanJob;
 use mimir_telemetry as telemetry;
 
+use super::cover::CoverArt;
 use super::extract::{extract_tags, Tags};
 use super::heuristic::{parse_filename, HeuristicTags};
 use super::probe::{extract_cover, probe_file, Probe, ProbeError};
+use super::sidecar::{find_cover_sidecar, find_lyrics_sidecar};
 use super::upsert::{upsert_album, upsert_artist};
 
 #[derive(Debug, Error)]
@@ -116,21 +118,42 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
         None
     };
 
-    if let (Some(album_id), Ok(Some(cover))) = (album_id, extract_cover(&path)) {
-        match attach_album_cover(conn, album_id, &cover, "embedded") {
-            Ok(_) => telemetry::log(
-                "DEBUG",
-                "ingest",
-                &format!(
-                    "cover attached album_id={album_id} mime={}",
-                    cover.mime_type
+    if let Some(album_id) = album_id {
+        // Try embedded cover first; fall back to a sidecar (cover.jpg,
+        // folder.jpg, front.jpg) when the audio file has no embedded
+        // art. The first track in a directory to provide the cover wins;
+        // the others no-op because `attach_album_cover` is idempotent on
+        // the content hash.
+        let embedded = extract_cover(&path).ok().flatten();
+        let cover_to_use: Option<(CoverArt, &'static str)> = if let Some(c) = embedded {
+            Some((c, "embedded"))
+        } else {
+            find_cover_sidecar(&path).map(|s| {
+                (
+                    CoverArt {
+                        mime_type: s.mime_type,
+                        data: s.data,
+                    },
+                    "sidecar",
+                )
+            })
+        };
+        if let Some((cover, source)) = cover_to_use {
+            match attach_album_cover(conn, album_id, &cover, source) {
+                Ok(_) => telemetry::log(
+                    "DEBUG",
+                    "ingest",
+                    &format!(
+                        "cover attached album_id={album_id} mime={} source={source}",
+                        cover.mime_type
+                    ),
                 ),
-            ),
-            Err(e) => telemetry::log(
-                "WARN",
-                "ingest",
-                &format!("attach_album_cover failed album_id={album_id} err={e}"),
-            ),
+                Err(e) => telemetry::log(
+                    "WARN",
+                    "ingest",
+                    &format!("attach_album_cover failed album_id={album_id} err={e}"),
+                ),
+            }
         }
     }
 
@@ -211,6 +234,26 @@ pub fn ingest(conn: &Connection, job: ScanJob) -> Result<i64, IngestError> {
                 &format!("lyrics upsert failed track_id={track_id} err={e}"),
             ),
         }
+    } else if let Some(sidecar) = find_lyrics_sidecar(&path) {
+        // Embedded tags had no lyrics — fall back to a sidecar `<basename>.lrc`
+        // (or `.txt`). The DB only stores unsynced text; the LRC timestamps
+        // are stripped by `find_lyrics_sidecar`.
+        match upsert_lyrics(conn, track_id, &sidecar.text, &sidecar.language, "sidecar") {
+            Ok(()) => telemetry::log(
+                "DEBUG",
+                "ingest",
+                &format!(
+                    "lyrics attached (sidecar) track_id={track_id} bytes={} source={}",
+                    sidecar.text.len(),
+                    sidecar.source
+                ),
+            ),
+            Err(e) => telemetry::log(
+                "WARN",
+                "ingest",
+                &format!("lyrics upsert (sidecar) failed track_id={track_id} err={e}"),
+            ),
+        }
     }
 
     tx.commit()?;
@@ -276,8 +319,12 @@ fn apply_heuristic(path: &Path, tags: &mut Tags) {
 /// Drain `rx` and call `ingest` for each job. Returns when the sender
 /// closes the channel. Per-job errors are logged to the file (and stderr).
 /// The worker keeps going.
+///
+/// Borrows `Library` (not a single `Connection`) so each ingest grabs its
+/// own pooled connection — survives transient pool pressure and avoids
+/// holding one connection open for the worker's entire lifetime.
 #[allow(clippy::needless_pass_by_value)]
-pub fn run_worker(conn: &Connection, rx: std::sync::mpsc::Receiver<ScanJob>) {
+pub fn run_worker(lib: &Library, rx: std::sync::mpsc::Receiver<ScanJob>) {
     telemetry::log("INFO", "worker", "run_worker started");
     let mut processed = 0u64;
     while let Ok(job) = rx.recv() {
@@ -291,7 +338,18 @@ pub fn run_worker(conn: &Connection, rx: std::sync::mpsc::Receiver<ScanJob>) {
                 job.path.display()
             ),
         );
-        if let Err(e) = ingest(conn, job) {
+        let conn = match lib.conn() {
+            Ok(c) => c,
+            Err(e) => {
+                telemetry::log(
+                    "ERROR",
+                    "worker",
+                    &format!("conn acquire failed for job {}: {e}", job.path.display()),
+                );
+                continue;
+            }
+        };
+        if let Err(e) = ingest(&conn, job) {
             telemetry::log("ERROR", "ingest", &format!("{e}"));
         }
     }

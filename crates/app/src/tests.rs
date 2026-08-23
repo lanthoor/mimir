@@ -110,7 +110,9 @@ fn add_folder_upserts_and_returns_id() {
 
     let state = AppState::new();
     state.open_library(&db).expect("open");
-    let (id, _) = state.add_folder(&music).expect("add folder");
+    let id = state
+        .add_folder::<fn(Result<mimir_core::scanner::ScanSummary, String>)>(&music, None)
+        .expect("add folder");
     assert!(id > 0);
     // Note: the ScanJob is async; the worker thread may still be running.
     // The folder row is enough to verify the command.
@@ -133,8 +135,12 @@ fn add_folder_duplicate_path_is_idempotent() {
     std::fs::create_dir_all(&music).expect("mkdir");
     let state = AppState::new();
     state.open_library(&db).expect("open");
-    let (id1, _) = state.add_folder(&music).expect("first");
-    let (id2, _) = state.add_folder(&music).expect("second");
+    let id1 = state
+        .add_folder::<fn(Result<mimir_core::scanner::ScanSummary, String>)>(&music, None)
+        .expect("first");
+    let id2 = state
+        .add_folder::<fn(Result<mimir_core::scanner::ScanSummary, String>)>(&music, None)
+        .expect("second");
     assert_eq!(id1, id2, "duplicate folder path must dedupe");
 }
 
@@ -157,7 +163,7 @@ fn add_folders_multi_inserts_distinct_rows() {
         ])
         .expect("multi");
     assert_eq!(results.len(), 2);
-    assert_ne!(results[0].0, results[1].0);
+    assert_ne!(results[0], results[1]);
 }
 
 #[test]
@@ -351,7 +357,9 @@ fn remove_folder_marks_inactive_and_rejects_unknown_id() {
     std::fs::create_dir_all(&music).expect("mkdir");
     let state = AppState::new();
     state.open_library(&db).expect("open");
-    let (id, _) = state.add_folder(&music).expect("add folder");
+    let id = state
+        .add_folder::<fn(Result<mimir_core::scanner::ScanSummary, String>)>(&music, None)
+        .expect("add folder");
 
     state.remove_folder(id).expect("remove");
 
@@ -435,4 +443,16 @@ fn rename_folder_updates_folder_and_tracks_under_it() {
         )
         .expect("other lookup");
     assert_eq!(other_count, 1, "outside-tracks must not be rewritten");
+}
+
+#[test]
+fn cover_id_from_path_parses_mimircover_paths() {
+    use crate::cover_id_from_path;
+    assert_eq!(cover_id_from_path("/cover/5"), Some(5));
+    assert_eq!(cover_id_from_path("/cover/100"), Some(100));
+    // Not a cover path, or malformed: no id.
+    assert_eq!(cover_id_from_path("/"), None);
+    assert_eq!(cover_id_from_path("/cover/"), None);
+    assert_eq!(cover_id_from_path("/cover/abc"), None);
+    assert_eq!(cover_id_from_path("/coverx/5"), None);
 }

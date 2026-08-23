@@ -4,6 +4,7 @@ mod cover;
 mod extract;
 mod heuristic;
 mod probe;
+mod sidecar;
 mod upsert;
 mod worker;
 
@@ -14,5 +15,6 @@ pub use cover::{select_cover, CoverArt};
 pub use extract::{extract_tags, parse_replaygain, Tags};
 pub use heuristic::{parse_filename, HeuristicTags};
 pub use probe::{extract_cover, probe_file, Probe};
+pub use sidecar::{find_cover_sidecar, find_lyrics_sidecar, SidecarCover, SidecarLyrics};
 pub use upsert::{upsert_album, upsert_artist};
 pub use worker::{ingest, run_worker, IngestError};
