@@ -7,16 +7,16 @@ use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use notify::{RecursiveMode, Watcher};
+use notify::RecursiveMode;
 
 use mimir_telemetry as telemetry;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 
 use super::event::IngestEvent;
 
 /// Handle to a running watcher. Dropping the handle stops it.
 pub struct WatcherHandle {
-    _debouncer: Debouncer<notify::RecommendedWatcher, FileIdMap>,
+    _debouncer: Debouncer<notify::RecommendedWatcher, RecommendedCache>,
 }
 
 /// Spawn a recursive watcher on `root` and forward `IngestEvent`s to `tx`.
@@ -99,7 +99,7 @@ pub fn spawn_watcher(root: &Path, tx: Sender<IngestEvent>) -> Result<WatcherHand
         },
     )?;
 
-    debouncer.watcher().watch(root, RecursiveMode::Recursive)?;
+    debouncer.watch(root, RecursiveMode::Recursive)?;
     telemetry::log(
         "INFO",
         "watcher",
