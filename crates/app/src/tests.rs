@@ -248,7 +248,10 @@ fn list_artists_returns_inserted_artists() {
     let rows = state.list_artists().expect("list");
     // Migration 0004 seeds "Unknown Artist" — expect Björk plus that placeholder.
     let names: Vec<String> = rows.iter().map(|a| a.name.clone()).collect();
-    assert!(names.contains(&"Björk".to_string()), "expected Björk, got {names:?}");
+    assert!(
+        names.contains(&"Björk".to_string()),
+        "expected Björk, got {names:?}"
+    );
     let bjork = rows.iter().find(|a| a.name == "Björk").expect("bjork");
     assert_eq!(
         bjork.track_count, 0,
