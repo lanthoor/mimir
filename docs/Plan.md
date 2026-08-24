@@ -8,6 +8,69 @@
 
 ---
 
+## Feature checklist
+
+This is the single source of truth for feature tracking. Every feature in
+[Requirements](Requirements.md) and the tiers below appears here; a check
+means it is implemented and shipped (or at CI-green on `main`).
+
+| Feature | Status |
+|---------|--------|
+| Watched folders + recursive file watcher | ☑ |
+| Scan on add / on startup; debounced, idempotent | ☑ |
+| Tag extraction (embedded: ID3v2, Vorbis, APE, MP4) via `lofty` | ☑ |
+| Folder/filename heuristics fallback | ☑ |
+| Views: Tracks / Albums / Artists / Genres / Years / Folders | ☑ |
+| Views: Playlists | ☐ |
+| Full-text search | ☑ |
+| Search: field operators (`artist:"foo" year:>2000`) | ☐ |
+| Search: fuzzy match, saved searches | ☐ |
+| Faceted filters (genre / year / artist / album) | ☑ |
+| Inline tag editor (DB-only) | ☑ |
+| Batch tag editor with revert | ☐ |
+| Lyrics: embedded + `.lrc` sidecar + display | ☑ |
+| Lyrics: synced (timed) display | ☐ |
+| Cover art: albums (embedded) | ☑ |
+| Cover art: artists | ☐ |
+| Playback: play / pause / resume / stop / next / previous | ☑ |
+| Playback: seek | ☐ |
+| Queue (persistent, circular, reorder, jump) | ☑ |
+| Shuffle / repeat (one or all) | ☐ |
+| ReplayGain (track + album tags) applied to volume | ☑ |
+| ReplayGain analysis (peak/RMS generation) | ☐ |
+| Gapless playback + crossfade | ☐ |
+| Parametric EQ | ☐ |
+| AB repeat, speed / pitch | ☐ |
+| Per-output device profiles | ☐ |
+| Multi-folder batch add | ☑ |
+| Drag-drop folder add | ☐ |
+| Remove / rename watched folder | ☑ |
+| Theme: light / dark / follow OS | ☑ |
+| Settings: per-library profiles, library switching | ☐ |
+| Backup / restore library DB | ☐ |
+| Smart playlists (rules engine) | ☐ |
+| Playlists: M3U / M3U8 / PLS / XSPF / JSPF import/export | ☐ |
+| Fingerprinting (Chromaprint) + AcoustID | ☐ |
+| Enrichment: MusicBrainz / Cover Art Archive fetch | ☐ |
+| Enrichment: Discogs / Last.fm; canonical tag write-back | ☐ |
+| Scrobbling (Last.fm / ListenBrainz) | ☐ |
+| Listening history + top tracks/artists/albums | ☐ |
+| Library stats (formats, bitrate, total duration) | ☐ |
+| Labels / Composers / Decades views | ☐ |
+| Virtualized lists for ≥ 10k rows | ☐ |
+| Native menu + global transport hotkeys | ☐ |
+| i18n (language bundles, RTL) | ☐ |
+| Accessibility audit (keyboard, screen reader, contrast) | ☐ |
+| Plugin API (metadata sources, scrobblers, DSP, UI panels) | ☐ |
+| Auto-update with signed binaries | ☐ |
+| Code signing + notarization (macOS) / Authenticode (Windows) | ☐ |
+| Crash reporting (opt-in) | ☐ |
+| Bundles: Linux AppImage + .deb (CI), macOS .dmg (CI) | ☑ |
+| Bundles: Windows MSI | ☐ |
+| Multi-OS CI matrix (Windows / macOS runners) | ☐ |
+
+---
+
 ## Strategy
 
 Build a **walking-skeleton MVP** end-to-end first — every architectural seam is real, but each tier is at its cheapest viable form. Subsequent iterations deepen each tier.

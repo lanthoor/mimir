@@ -18,7 +18,7 @@ A desktop music catalog and player that watches folders, extracts/enriches metad
 - [Requirements (PRD)](docs/Requirements.md)
 - [Architecture](docs/Architecture.md)
 - [Technical Decisions](docs/TechnicalDecisions.md)
-- [Plan](docs/Plan.md)
+- [Plan](docs/Plan.md) — includes the [feature checklist](docs/Plan.md#feature-checklist), the single source of truth for what is shipped
 - [Contributing](CONTRIBUTING.md)
 
 ## Toolchain
@@ -32,4 +32,4 @@ MVP walking skeleton (S0) complete — ingests, indexes, browses (Tracks / Album
 **Artists** / Genres / Years / Folders), searches, and plays back. Release
 `0.1.0` tagged; Linux AppImage/.deb via `cargo tauri build`.
 
-Tier 1 (library depth) is in flight — see [Plan](docs/Plan.md).
+Tier 2 (playback quality) is starting — see the [feature checklist](docs/Plan.md#feature-checklist) for exactly what is done.
