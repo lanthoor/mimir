@@ -30,8 +30,8 @@ export function AlbumsIcons() {
             >
               <AlbumCover albumId={a.id} className="aspect-square w-full" />
               <div className="p-3">
-                <div className="truncate font-semibold">{a.title}</div>
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="break-words font-semibold">{a.title}</div>
+                <div className="break-words text-xs text-muted-foreground">
                   {[a.artist_name, `${a.track_count} tracks`]
                     .filter(Boolean)
                     .join(" — ")}

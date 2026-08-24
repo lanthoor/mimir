@@ -91,13 +91,13 @@ function TreeNode({ node, depth, onPlay, onRemoveFolder }: Props) {
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <span
-              className="flex flex-1 cursor-default items-center gap-2 truncate text-sm"
+              className="flex min-w-0 flex-1 cursor-default items-start gap-2 text-sm"
               onDoubleClick={() => {
                 if (node.folder_id != null) setOpen((o) => !o);
               }}
             >
               <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate font-semibold">
+              <span className="min-w-0 break-words font-semibold">
                 {node.name ?? basename(node.path)}
               </span>
               <span className="ml-2 text-xs text-muted-foreground">
@@ -173,13 +173,13 @@ function FileTreeNode({
 }) {
   return (
     <div
-      className="flex cursor-pointer items-center gap-2 truncate rounded px-1 py-0.5 text-sm text-muted-foreground hover:bg-accent/40"
+      className="flex min-w-0 cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm text-muted-foreground hover:bg-accent/40"
       style={{ paddingLeft: depth * 16 }}
       onDoubleClick={() => onPlay(file)}
       title={file.path}
     >
       <Music className="h-3 w-3 shrink-0" />
-      <span className="truncate">
+      <span className="min-w-0 break-words">
         {file.title ?? basename(file.path)}
       </span>
     </div>

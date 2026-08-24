@@ -48,9 +48,9 @@ function TrackIcon({ track }: { track: import("@/lib/types").TrackRow }) {
         >
           <div className="flex items-center gap-2 text-base font-semibold">
             <Music className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="truncate">{track.title ?? "(untitled)"}</span>
+            <span className="break-words">{track.title ?? "(untitled)"}</span>
           </div>
-          <div className="truncate text-xs text-muted-foreground">
+          <div className="break-words text-xs text-muted-foreground">
             {[track.artist_name, track.album_title].filter(Boolean).join(" — ") ||
               track.path}
           </div>

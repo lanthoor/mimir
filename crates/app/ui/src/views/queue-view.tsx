@@ -155,11 +155,11 @@ export function QueueView() {
                   <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground" />
                 )}
                 <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                  <span className={"truncate " + (item.is_current ? "font-semibold" : "")}>
+                  <span className={"break-words " + (item.is_current ? "font-semibold" : "")}>
                     {item.title}
                   </span>
                   {item.artist_name && (
-                    <span className="truncate text-xs text-muted-foreground">
+                    <span className="break-words text-xs text-muted-foreground">
                       {item.artist_name}
                     </span>
                   )}
