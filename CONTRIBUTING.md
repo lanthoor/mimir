@@ -5,11 +5,12 @@ build, test, and submit changes.
 
 ## Project layout
 
-Mimir is a Rust workspace with three crates:
+Mimir is a Rust workspace with four crates:
 
 - `crates/core` — library model, ingestion, metadata, DB.
 - `crates/audio` — decode, DSP, output.
-- `crates/app` — host binary (Tauri shell in Tier 0).
+- `crates/app` — host binary (Tauri shell + React frontend in `crates/app/ui`).
+- `crates/telemetry` — file-rotating logger.
 
 Tier 0 (the walking-skeleton MVP) and beyond is tracked in [`docs/Plan.md`](docs/Plan.md).
 Product scope lives in [`docs/Requirements.md`](docs/Requirements.md),
