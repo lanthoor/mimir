@@ -102,6 +102,116 @@ pub fn list_folders(conn: &Connection) -> Result<FolderView, rusqlite::Error> {
     })
 }
 
+/// One row of the watched-folder toolbar list (just the data the SPA
+/// needs to render a list item and drive the Remove action).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ListFolderRow {
+    pub id: i64,
+    pub path: String,
+}
+
+/// Return up to `limit` watched folders (active roots) starting at
+/// `offset`. Ordered by `added_at, id` to match the tree's `root_children`
+/// order, so paging here can't drift from `library_folder_tree`.
+pub fn list_listed_folders(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<ListFolderRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("list_listed_folders limit={limit} offset={offset}"),
+    );
+    let mut stmt = conn.prepare(
+        "SELECT id, path FROM folder WHERE active = 1 \
+         ORDER BY added_at, id \
+         LIMIT ?1 OFFSET ?2",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
+        Ok(ListFolderRow {
+            id: row.get(0)?,
+            path: row.get(1)?,
+        })
+    })?;
+    let out: Vec<ListFolderRow> = rows.collect::<Result<_, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_listed_folders returned n={}", out.len()),
+    );
+    Ok(out)
+}
+
+/// Total number of active watched folders. Sibling of
+/// `list_listed_folders`.
+pub fn count_listed_folders(conn: &Connection) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "count_listed_folders");
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM folder WHERE active = 1", [], |row| {
+        row.get(0)
+    })?;
+    mimir_telemetry::log("INFO", "query", &format!("count_listed_folders ok n={n}"));
+    Ok(n)
+}
+
+/// Return up to `limit` audio files inside `folder_id` starting at `offset`,
+/// ordered by path (case-insensitive, then by track id as a final
+/// tiebreaker so pages don't overlap).
+pub fn list_folder_files(
+    conn: &Connection,
+    folder_id: i64,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<FolderFile>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("list_folder_files folder_id={folder_id} limit={limit} offset={offset}"),
+    );
+    let mut stmt = conn.prepare(
+        "SELECT path, title, id \
+         FROM track \
+         WHERE folder_id = ?1 \
+         ORDER BY path COLLATE NOCASE, id \
+         LIMIT ?2 OFFSET ?3",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![folder_id, limit, offset], |row| {
+        Ok(FolderFile {
+            path: row.get(0)?,
+            title: row.get(1)?,
+            track_id: row.get(2)?,
+        })
+    })?;
+    let out: Vec<FolderFile> = rows.collect::<Result<_, _>>()?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_folder_files returned n={}", out.len()),
+    );
+    Ok(out)
+}
+
+/// Total number of audio files under `folder_id`. Sibling of
+/// `list_folder_files`.
+pub fn count_folder_files(conn: &Connection, folder_id: i64) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("count_folder_files folder_id={folder_id}"),
+    );
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM track WHERE folder_id = ?1",
+        rusqlite::params![folder_id],
+        |row| row.get(0),
+    )?;
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("count_folder_files folder_id={folder_id} ok n={n}"),
+    );
+    Ok(n)
+}
+
 fn build_node(
     conn: &Connection,
     dir: &Path,

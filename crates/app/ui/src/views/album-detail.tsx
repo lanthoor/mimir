@@ -1,37 +1,30 @@
-import { useEffect, useState } from "react";
 import { ArrowLeft, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlbumCover } from "@/components/album-cover";
+import { PaginationBar } from "@/components/pagination-bar";
 import { useStore } from "@/lib/store";
 import * as ipc from "@/lib/ipc";
 import { AlbumTracksTable } from "@/views/album-tracks-table";
 import { addAlbumToQueue } from "@/lib/queue-actions";
-import type { TrackRow } from "@/lib/types";
+import { useAlbumTracksPage } from "@/hooks/use-pages";
 
 type Props = { albumId: number };
 
 export function AlbumDetail({ albumId }: Props) {
+  // Page-fetching hook for the per-album tracks. Wraps `tracksList` /
+  // `tracks.page` so the rest of the SPA just reads the store.
+  useAlbumTracksPage(albumId);
   const selectAlbum = useStore((s) => s.selectAlbum);
   const album = useStore((s) =>
     s.albumsList.find((a) => a.id === albumId),
   );
-  const [tracks, setTracks] = useState<TrackRow[] | null>(null);
+  const tracks = useStore((s) => s.tracksList);
+  const page = useStore((s) => s.tracks.page);
+  const setTracksPage = useStore((s) => s.setTracksPage);
   const setNowPlaying = useStore((s) => s.setNowPlaying);
   const setNowPlayingTrackId = useStore((s) => s.setNowPlayingTrackId);
   const setLyricsTrackId = useStore((s) => s.setLyricsTrackId);
-
-  useEffect(() => {
-    if (!album) {
-      selectAlbum(null);
-      return;
-    }
-    setTracks(null);
-    ipc
-      .libraryQueryTracks({ albumId: album.id, limit: 1000 })
-      .then((t) => setTracks(t))
-      .catch(console.error);
-  }, [album, selectAlbum]);
 
   if (!album) {
     return (
@@ -98,14 +91,20 @@ export function AlbumDetail({ albumId }: Props) {
           </Button>
         </div>
       </div>
-      {tracks == null ? (
-        <div className="p-6 text-sm text-muted-foreground">Loading…</div>
-      ) : tracks.length === 0 ? (
+      {tracks.length === 0 ? (
         <div className="p-6 text-sm text-muted-foreground">
           No tracks indexed.
         </div>
       ) : (
-        <AlbumTracksTable tracks={tracks} />
+        <>
+          <AlbumTracksTable tracks={tracks} />
+          <PaginationBar
+            page={page.page}
+            pageSize={page.pageSize}
+            total={page.total}
+            onChange={setTracksPage}
+          />
+        </>
       )}
     </div>
   );

@@ -11,7 +11,6 @@ import { Separator } from "@/components/ui/separator";
 import { LyricsDialog } from "@/components/lyrics-dialog";
 import { useStore } from "@/lib/store";
 import * as ipc from "@/lib/ipc";
-import { useLibrary } from "@/hooks/use-library";
 
 export function NowPlaying() {
   const nowPlayingTrackId = useStore((s) => s.nowPlayingTrackId);
@@ -22,7 +21,7 @@ export function NowPlaying() {
   const playerSnapshot = useStore((s) => s.playerSnapshot);
   const setPlayerSnapshot = useStore((s) => s.setPlayerSnapshot);
   const setNowPlaying = useStore((s) => s.setNowPlaying);
-  const { refresh } = useLibrary();
+  const bumpTracksRefresh = useStore((s) => s.bumpTracksRefresh);
 
   const play = useCallback(() => {
     if (nowPlayingTrackId != null) {
@@ -65,11 +64,11 @@ export function NowPlaying() {
       // The current path is the file path; we don't have title/artist
       // for it without another round-trip. The track list refresh from
       // `play_track` updates them via the caller.
-      void refresh();
+      bumpTracksRefresh();
       const filename = playerSnapshot.current.split(/[\\/]/).pop() ?? "";
       setNowPlaying(filename, "");
     }
-  }, [playerSnapshot, nowPlayingTrackId, setNowPlaying, refresh]);
+  }, [playerSnapshot, nowPlayingTrackId, setNowPlaying, bumpTracksRefresh]);
 
   return (
     <footer className="flex items-center gap-3 border-t border-border bg-card px-4 py-2">

@@ -55,3 +55,11 @@ fn row_to_album(row: &rusqlite::Row) -> rusqlite::Result<AlbumRow> {
         track_count: row.get(5)?,
     })
 }
+
+/// Total number of albums in the library. Sibling of `list_albums`.
+pub fn count_albums(conn: &Connection) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "count_albums");
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM album", [], |row| row.get(0))?;
+    mimir_telemetry::log("INFO", "query", &format!("count_albums ok n={n}"));
+    Ok(n)
+}

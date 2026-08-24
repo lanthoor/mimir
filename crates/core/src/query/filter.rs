@@ -20,22 +20,12 @@ pub struct TrackFilter {
     pub album_id: Option<i64>,
 }
 
-pub fn list_tracks_filtered(
-    conn: &Connection,
-    filter: &TrackFilter,
-    limit: i64,
-    offset: i64,
-) -> Result<Vec<TrackRow>, rusqlite::Error> {
-    mimir_telemetry::log(
-        "INFO",
-        "query",
-        &format!("list_tracks_filtered filter={filter:?} limit={limit} offset={offset}"),
-    );
+/// Build the WHERE clauses + parameter binds for a `TrackFilter` against
+/// the standard `track`/`album`/`artist` join. Used by both the listing
+/// and the count sibling so the predicates can't drift apart.
+fn predicate(filter: &TrackFilter) -> (String, Vec<Box<dyn ToSql>>) {
     let mut sql = String::from(
-        "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
-                t.genre, a.year, \
-                a.id, a.title, ar.id, ar.name \
-         FROM track t \
+        "FROM track t \
          LEFT JOIN album a  ON a.id  = t.album_id \
          LEFT JOIN artist ar ON ar.id = a.album_artist_id \
          WHERE 1 = 1",
@@ -57,7 +47,28 @@ pub fn list_tracks_filtered(
         sql.push_str(" AND a.id = ?");
         binds.push(Box::new(abid));
     }
-    sql.push_str(" ORDER BY t.id LIMIT ? OFFSET ?");
+    (sql, binds)
+}
+
+pub fn list_tracks_filtered(
+    conn: &Connection,
+    filter: &TrackFilter,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<TrackRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("list_tracks_filtered filter={filter:?} limit={limit} offset={offset}"),
+    );
+    let (where_sql, mut binds) = predicate(filter);
+    let sql = format!(
+        "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
+                t.genre, a.year, \
+                a.id, a.title, ar.id, ar.name \
+         {where_sql} \
+         ORDER BY t.id LIMIT ? OFFSET ?"
+    );
     binds.push(Box::new(limit));
     binds.push(Box::new(offset));
 
@@ -71,4 +82,24 @@ pub fn list_tracks_filtered(
         &format!("list_tracks_filtered returned n={}", out.len()),
     );
     Ok(out)
+}
+
+/// Total number of tracks matching the filter. Sibling of
+/// `list_tracks_filtered`; uses the same `predicate` so the rows fetch
+/// and the count fetch can never disagree.
+pub fn count_tracks_filtered(
+    conn: &Connection,
+    filter: &TrackFilter,
+) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log(
+        "INFO",
+        "query",
+        &format!("count_tracks_filtered filter={filter:?}"),
+    );
+    let (where_sql, binds) = predicate(filter);
+    let sql = format!("SELECT COUNT(*) {where_sql}");
+    let binds_ref: Vec<&dyn ToSql> = binds.iter().map(std::convert::AsRef::as_ref).collect();
+    let n: i64 = conn.query_row(&sql, params_from_iter(binds_ref), |row| row.get(0))?;
+    mimir_telemetry::log("INFO", "query", &format!("count_tracks_filtered ok n={n}"));
+    Ok(n)
 }

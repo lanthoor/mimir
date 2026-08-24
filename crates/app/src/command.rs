@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "tauri")]
 use mimir_audio::TransportCommand;
 #[cfg(feature = "tauri")]
-use mimir_core::query::{AlbumRow, ArtistRow, FolderView, GenreRow, TrackRow, YearRow};
+use mimir_core::query::{
+    AlbumRow, ArtistRow, FolderFile, FolderView, GenreRow, ListFolderRow, TrackRow, YearRow,
+};
 #[cfg(feature = "tauri")]
 use mimir_core::rusqlite;
 
@@ -54,6 +56,46 @@ pub struct FolderRow {
 #[tauri::command]
 pub fn library_list_folders(state: tauri::State<'_, AppState>) -> Result<Vec<FolderRow>, AppError> {
     state.list_folders()
+}
+
+/// Paginated list of watched folders (just id + path, no recursive
+/// `file_count`). Used by the toolbar row list when the root count
+/// grows beyond a single screen.
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_listed_folders(
+    state: tauri::State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<ListFolderRow>, AppError> {
+    state.list_listed_folders(limit.unwrap_or(50), offset.unwrap_or(0))
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_count_listed_folders(state: tauri::State<'_, AppState>) -> Result<i64, AppError> {
+    state.count_listed_folders()
+}
+
+/// Paginated audio files inside one watched folder (icons-mode grids).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_list_folder_files(
+    state: tauri::State<'_, AppState>,
+    folder_id: i64,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<FolderFile>, AppError> {
+    state.list_folder_files(folder_id, limit.unwrap_or(50), offset.unwrap_or(0))
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_count_folder_files(
+    state: tauri::State<'_, AppState>,
+    folder_id: i64,
+) -> Result<i64, AppError> {
+    state.count_folder_files(folder_id)
 }
 
 /// Folder tree (icon-mode flat list + tree-mode hierarchy). Empty
@@ -221,8 +263,29 @@ pub fn library_search(
     state: tauri::State<'_, AppState>,
     query: String,
     limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Result<Vec<TrackRow>, AppError> {
-    state.search(&query, limit.unwrap_or(50))
+    state
+        .search(&query, limit.unwrap_or(50) + offset.unwrap_or(0))
+        .map(|rows| {
+            let off = usize::try_from(offset.unwrap_or(0)).unwrap_or(0);
+            let lim = usize::try_from(limit.unwrap_or(50)).unwrap_or(0);
+            rows.into_iter().skip(off).take(lim).collect()
+        })
+}
+
+/// Combined page endpoint for search: returns `{ rows, total }`. Rows are
+/// ordered by FTS rank then track id; total reflects every match across
+/// the active predicate (FTS or LIKE fallback).
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_search_tracks_page(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<mimir_core::query::TrackSearchPage, AppError> {
+    state.search_tracks_page(&query, limit.unwrap_or(50), offset.unwrap_or(0))
 }
 
 /// Paged list of albums.
@@ -236,25 +299,61 @@ pub fn library_list_albums(
     state.list_albums(limit.unwrap_or(100), offset.unwrap_or(0))
 }
 
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_count_albums(state: tauri::State<'_, AppState>) -> Result<i64, AppError> {
+    state.count_albums()
+}
+
 /// Distinct genres in the library with track counts.
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn library_list_genres(state: tauri::State<'_, AppState>) -> Result<Vec<GenreRow>, AppError> {
-    state.list_genres()
+pub fn library_list_genres(
+    state: tauri::State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<GenreRow>, AppError> {
+    state.list_genres(limit.unwrap_or(100), offset.unwrap_or(0))
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_count_genres(state: tauri::State<'_, AppState>) -> Result<i64, AppError> {
+    state.count_genres()
 }
 
 /// Distinct years (from albums) with track counts.
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn library_list_years(state: tauri::State<'_, AppState>) -> Result<Vec<YearRow>, AppError> {
-    state.list_years()
+pub fn library_list_years(
+    state: tauri::State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<YearRow>, AppError> {
+    state.list_years(limit.unwrap_or(100), offset.unwrap_or(0))
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_count_years(state: tauri::State<'_, AppState>) -> Result<i64, AppError> {
+    state.count_years()
 }
 
 /// All artists in the library with track counts, sorted by sort name.
 #[cfg(feature = "tauri")]
 #[tauri::command]
-pub fn library_list_artists(state: tauri::State<'_, AppState>) -> Result<Vec<ArtistRow>, AppError> {
-    state.list_artists()
+pub fn library_list_artists(
+    state: tauri::State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<ArtistRow>, AppError> {
+    state.list_artists(limit.unwrap_or(100), offset.unwrap_or(0))
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_count_artists(state: tauri::State<'_, AppState>) -> Result<i64, AppError> {
+    state.count_artists()
 }
 
 /// Tracks filtered by optional genre/year/artist/album facets.
@@ -281,6 +380,19 @@ pub fn library_query_tracks(
     )
 }
 
+#[cfg(feature = "tauri")]
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn library_count_tracks_filtered(
+    state: tauri::State<'_, AppState>,
+    genre: Option<String>,
+    year: Option<i32>,
+    artist_id: Option<i64>,
+    album_id: Option<i64>,
+) -> Result<i64, AppError> {
+    state.count_tracks_filtered(genre, year, artist_id, album_id)
+}
+
 /// Paged list of tracks. Used for the Tracks view's default render so the
 /// UI never asks `FTS` to match an empty query (which is a `SQLite` syntax error).
 #[cfg(feature = "tauri")]
@@ -291,6 +403,12 @@ pub fn library_list_tracks(
     offset: Option<i64>,
 ) -> Result<Vec<TrackRow>, AppError> {
     state.list_tracks(limit.unwrap_or(100), offset.unwrap_or(0))
+}
+
+#[cfg(feature = "tauri")]
+#[tauri::command]
+pub fn library_count_tracks(state: tauri::State<'_, AppState>) -> Result<i64, AppError> {
+    state.count_tracks()
 }
 
 /// Editable tags for a single track.

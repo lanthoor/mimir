@@ -1,8 +1,19 @@
 //! FTS5 search over track titles, albums, and artists.
 
 use rusqlite::Connection;
+use serde::Serialize;
 
 use super::tracks::{row_to_track, TrackRow};
+
+/// Page-shaped search result: the rows for this page plus the total
+/// match count across all pages. The count is computed from the same
+/// predicate (FTS or LIKE fallback) that produced the rows, so they
+/// cannot disagree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TrackSearchPage {
+    pub rows: Vec<TrackRow>,
+    pub total: i64,
+}
 
 /// Return up to `limit` tracks matching `query` (`SQLite` FTS5 MATCH syntax).
 /// The result is ordered by FTS rank, then track id.
@@ -20,11 +31,23 @@ pub fn search_tracks(
     query: &str,
     limit: i64,
 ) -> Result<Vec<TrackRow>, rusqlite::Error> {
+    search_tracks_page(conn, query, limit, 0).map(|p| p.rows)
+}
+
+/// Combined page endpoint: returns the rows for one page plus the total
+/// across all pages. Pagination is offset-based; the active predicate
+/// (FTS or LIKE fallback) drives both row and count queries.
+pub fn search_tracks_page(
+    conn: &Connection,
+    query: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<TrackSearchPage, rusqlite::Error> {
     let query = rewrite_as_prefix(query);
     mimir_telemetry::log(
         "INFO",
         "query",
-        &format!("search_tracks query={query:?} limit={limit}"),
+        &format!("search_tracks_page query={query:?} limit={limit} offset={offset}"),
     );
     let mut stmt = conn.prepare(
         "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
@@ -36,19 +59,21 @@ pub fn search_tracks(
          LEFT JOIN artist ar ON ar.id = a.album_artist_id \
          WHERE track_fts MATCH ?1 \
          ORDER BY rank, t.id \
-         LIMIT ?2",
+         LIMIT ?2 OFFSET ?3",
     )?;
     let rows: Vec<TrackRow> = stmt
-        .query_map(rusqlite::params![&query, limit], row_to_track)?
+        .query_map(rusqlite::params![&query, limit, offset], row_to_track)?
         .collect::<Result<Vec<_>, _>>()?;
 
     // FTS5's default prefix index skips 1-char tokens — `q` matches nothing
     // even though there are tracks starting with `Q`. Fall back to a
     // case-insensitive `LIKE` over the searchable columns so single-letter
     // typing still gives feedback. We only fall back when the user gave a
-    // short simple token; structured queries pass through.
-    let rows = if rows.is_empty() && is_short_simple_token(&query) {
+    // short simple token; structured queries pass through. The same
+    // predicate is used to compute the count so it tracks the rows.
+    if rows.is_empty() && is_short_simple_token(&query) {
         let pat = format!("%{query}%");
+        let limit_plus_offset = limit + offset;
         let mut stmt = conn.prepare(
             "SELECT t.id, t.path, t.title, t.track_no, t.disc_no, t.duration_ms, t.codec, \
                     t.genre, a.year, \
@@ -60,30 +85,53 @@ pub fn search_tracks(
                 OR a.title  LIKE ?1 COLLATE NOCASE \
                 OR ar.name  LIKE ?1 COLLATE NOCASE \
              ORDER BY t.id \
-             LIMIT ?2",
+             LIMIT ?2 OFFSET ?3",
         )?;
-        let fallback: Vec<TrackRow> = stmt
-            .query_map(rusqlite::params![&pat, limit], row_to_track)?
+        let like_rows: Vec<TrackRow> = stmt
+            .query_map(
+                rusqlite::params![&pat, limit_plus_offset, 0_i64],
+                row_to_track,
+            )?
             .collect::<Result<Vec<_>, _>>()?;
+        let total = i64::try_from(like_rows.len()).expect("total fits i64");
+        let start = usize::try_from(offset).unwrap_or(0).min(like_rows.len());
+        let end = start.saturating_add(usize::try_from(limit).unwrap_or(0));
+        let page = like_rows[start..end.min(like_rows.len())].to_vec();
         mimir_telemetry::log(
             "INFO",
             "query",
             &format!(
-                "search_tracks fts-empty, LIKE fallback returned n={}",
-                fallback.len()
+                "search_tracks_page fts-empty, LIKE fallback returned n={} total={total}",
+                page.len()
             ),
         );
-        fallback
-    } else {
-        rows
-    };
+        return Ok(TrackSearchPage { rows: page, total });
+    }
+
+    if rows.is_empty() {
+        mimir_telemetry::log("INFO", "query", "search_tracks_page returned n=0 total=0");
+        return Ok(TrackSearchPage {
+            rows: Vec::new(),
+            total: 0,
+        });
+    }
+
+    // Non-empty FTS path: count by replaying the MATCH predicate without
+    // paging so total reflects the full match set.
+    let total: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM track_fts WHERE track_fts MATCH ?1",
+            rusqlite::params![&query],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
 
     mimir_telemetry::log(
         "INFO",
         "query",
-        &format!("search_tracks returned n={}", rows.len()),
+        &format!("search_tracks_page returned n={} total={total}", rows.len()),
     );
-    Ok(rows)
+    Ok(TrackSearchPage { rows, total })
 }
 
 /// True when `query` is a single short alnum token (e.g. `q`, `qu`). Used to

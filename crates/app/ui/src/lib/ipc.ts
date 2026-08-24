@@ -6,15 +6,18 @@ import type {
   AlbumRow,
   ArtistRow,
   EditableTrackFields,
+  FolderFile,
   FolderRow,
   FolderView,
   GenreRow,
   LibraryStatus,
+  ListFolderRow,
   LyricsPayload,
   PlayerSnapshot,
   QueueItem,
   TrackPatch,
   TrackRow,
+  TrackSearchPage,
   YearRow,
 } from "./types";
 
@@ -29,6 +32,21 @@ export const libraryStatus = () =>
 export const libraryListFolders = () =>
   invoke<FolderRow[]>("library_list_folders");
 
+export const libraryListListedFolders = (limit = 50, offset = 0) =>
+  invoke<ListFolderRow[]>("library_list_listed_folders", { limit, offset });
+
+export const libraryCountListedFolders = () =>
+  invoke<number>("library_count_listed_folders");
+
+export const libraryListFolderFiles = (
+  folderId: number,
+  limit = 50,
+  offset = 0,
+) => invoke<FolderFile[]>("library_list_folder_files", { folderId, limit, offset });
+
+export const libraryCountFolderFiles = (folderId: number) =>
+  invoke<number>("library_count_folder_files", { folderId });
+
 export const libraryFolderTree = () =>
   invoke<FolderView>("library_folder_tree");
 
@@ -38,20 +56,48 @@ export const libraryAddFolder = (path: string) =>
 export const libraryAddFolders = (paths: string[]) =>
   invoke<number[]>("library_add_folders", { paths });
 
-export const librarySearch = (query: string, limit = 100) =>
-  invoke<TrackRow[]>("library_search", { query, limit });
+export const librarySearch = (
+  query: string,
+  limit = 50,
+  offset = 0,
+) => invoke<TrackRow[]>("library_search", { query, limit, offset });
 
-export const libraryListAlbums = (limit = 200, offset = 0) =>
+export const librarySearchTracksPage = (
+  query: string,
+  limit = 50,
+  offset = 0,
+) =>
+  invoke<TrackSearchPage>("library_search_tracks_page", {
+    query,
+    limit,
+    offset,
+  });
+
+export const libraryListAlbums = (limit = 50, offset = 0) =>
   invoke<AlbumRow[]>("library_list_albums", { limit, offset });
 
-export const libraryListGenres = () => invoke<GenreRow[]>("library_list_genres");
+export const libraryCountAlbums = () => invoke<number>("library_count_albums");
 
-export const libraryListArtists = () => invoke<ArtistRow[]>("library_list_artists");
+export const libraryListGenres = (limit = 50, offset = 0) =>
+  invoke<GenreRow[]>("library_list_genres", { limit, offset });
 
-export const libraryListYears = () => invoke<YearRow[]>("library_list_years");
+export const libraryCountGenres = () => invoke<number>("library_count_genres");
 
-export const libraryListTracks = (limit = 100, offset = 0) =>
+export const libraryListArtists = (limit = 50, offset = 0) =>
+  invoke<ArtistRow[]>("library_list_artists", { limit, offset });
+
+export const libraryCountArtists = () =>
+  invoke<number>("library_count_artists");
+
+export const libraryListYears = (limit = 50, offset = 0) =>
+  invoke<YearRow[]>("library_list_years", { limit, offset });
+
+export const libraryCountYears = () => invoke<number>("library_count_years");
+
+export const libraryListTracks = (limit = 50, offset = 0) =>
   invoke<TrackRow[]>("library_list_tracks", { limit, offset });
+
+export const libraryCountTracks = () => invoke<number>("library_count_tracks");
 
 export const libraryQueryTracks = (params: {
   genre?: string | null;
@@ -66,8 +112,21 @@ export const libraryQueryTracks = (params: {
     year: params.year,
     artistId: params.artistId,
     albumId: params.albumId,
-    limit: params.limit ?? 100,
+    limit: params.limit ?? 50,
     offset: params.offset ?? 0,
+  });
+
+export const libraryCountTracksFiltered = (params: {
+  genre?: string | null;
+  year?: number | null;
+  artistId?: number | null;
+  albumId?: number | null;
+}) =>
+  invoke<number>("library_count_tracks_filtered", {
+    genre: params.genre,
+    year: params.year,
+    artistId: params.artistId,
+    albumId: params.albumId,
   });
 
 export const libraryGetEditableTrack = (trackId: number) =>

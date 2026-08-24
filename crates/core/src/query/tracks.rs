@@ -54,6 +54,16 @@ pub fn list_tracks(
     Ok(rows)
 }
 
+/// Total number of tracks across the library. Used by the front-end to
+/// drive pagination; sibling to `list_tracks` so the count can be fetched
+/// in parallel with the rows.
+pub fn count_tracks(conn: &Connection) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "count_tracks");
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM track", [], |row| row.get(0))?;
+    mimir_telemetry::log("INFO", "query", &format!("count_tracks ok n={n}"));
+    Ok(n)
+}
+
 pub(crate) fn row_to_track(row: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
     Ok(TrackRow {
         id: row.get(0)?,
@@ -79,16 +89,25 @@ pub struct GenreRow {
     pub track_count: i64,
 }
 
-pub fn list_genres(conn: &Connection) -> Result<Vec<GenreRow>, rusqlite::Error> {
-    mimir_telemetry::log("DEBUG", "query", "list_genres");
+pub fn list_genres(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<GenreRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("list_genres limit={limit} offset={offset}"),
+    );
     let mut stmt = conn.prepare(
         "SELECT genre, COUNT(*) \
          FROM track \
          WHERE genre IS NOT NULL AND genre <> '' \
          GROUP BY genre \
-         ORDER BY genre COLLATE NOCASE",
+         ORDER BY genre COLLATE NOCASE \
+         LIMIT ?1 OFFSET ?2",
     )?;
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
         Ok(GenreRow {
             name: row.get(0)?,
             track_count: row.get(1)?,
@@ -103,6 +122,22 @@ pub fn list_genres(conn: &Connection) -> Result<Vec<GenreRow>, rusqlite::Error> 
     Ok(out)
 }
 
+/// Total number of distinct non-empty genres. Sibling of `list_genres`.
+pub fn count_genres(conn: &Connection) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "count_genres");
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ( \
+            SELECT 1 FROM track \
+            WHERE genre IS NOT NULL AND genre <> '' \
+            GROUP BY genre \
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    mimir_telemetry::log("INFO", "query", &format!("count_genres ok n={n}"));
+    Ok(n)
+}
+
 /// List distinct years from albums, with track counts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct YearRow {
@@ -110,16 +145,25 @@ pub struct YearRow {
     pub track_count: i64,
 }
 
-pub fn list_years(conn: &Connection) -> Result<Vec<YearRow>, rusqlite::Error> {
-    mimir_telemetry::log("DEBUG", "query", "list_years");
+pub fn list_years(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<YearRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("list_years limit={limit} offset={offset}"),
+    );
     let mut stmt = conn.prepare(
         "SELECT a.year, COUNT(t.id) \
          FROM album a JOIN track t ON t.album_id = a.id \
          WHERE a.year IS NOT NULL \
          GROUP BY a.year \
-         ORDER BY a.year",
+         ORDER BY a.year, a.id \
+         LIMIT ?1 OFFSET ?2",
     )?;
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
         Ok(YearRow {
             year: row.get(0)?,
             track_count: row.get(1)?,
@@ -132,4 +176,21 @@ pub fn list_years(conn: &Connection) -> Result<Vec<YearRow>, rusqlite::Error> {
         &format!("list_years returned n={}", out.len()),
     );
     Ok(out)
+}
+
+/// Total number of distinct non-null album years with at least one track.
+/// Sibling of `list_years`.
+pub fn count_years(conn: &Connection) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "count_years");
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ( \
+            SELECT 1 FROM album a JOIN track t ON t.album_id = a.id \
+            WHERE a.year IS NOT NULL \
+            GROUP BY a.year \
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    mimir_telemetry::log("INFO", "query", &format!("count_years ok n={n}"));
+    Ok(n)
 }

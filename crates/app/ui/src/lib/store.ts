@@ -3,7 +3,7 @@
 // that call `useStore`.
 
 import { create } from "zustand";
-import { subscribeWithSelector } from "zustand/middleware";
+import { persist, subscribeWithSelector } from "zustand/middleware";
 import type {
   AlbumRow,
   ArtistRow,
@@ -35,6 +35,32 @@ export type TracksFilter = {
   albumId: number | null;
 };
 
+/** Pagination slot for one view. Lives in the store so it survives
+ *  navigation back from another view. Only `page` + `pageSize` are
+ *  persisted to localStorage; `total` is recomputed on every mount. */
+export type PageState = {
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
+export const DEFAULT_PAGE_SIZE = 50;
+
+export const DEFAULT_PAGE = (): PageState => ({
+  page: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
+  total: 0,
+});
+
+/** Clamp `page` into [1, lastPage]. Returns 1 when total is 0. */
+export function clampPageTo(page: number, total: number, pageSize: number) {
+  if (total <= 0) return 1;
+  const last = Math.max(1, Math.ceil(total / pageSize));
+  if (page < 1) return 1;
+  if (page > last) return last;
+  return page;
+}
+
 type Store = {
   // View routing
   view: ViewKey;
@@ -45,25 +71,53 @@ type Store = {
     mode: TracksMode;
     query: string;
     filter: TracksFilter;
+    page: PageState;
   };
   setTracksMode: (m: TracksMode) => void;
   setTracksQuery: (q: string) => void;
   setTracksFilter: (f: TracksFilter) => void;
+  setTracksPage: (p: PageState["page"]) => void;
+  setTracksTotal: (total: PageState["total"]) => void;
+  setTracksPageSize: (size: PageState["pageSize"]) => void;
 
   albums: {
     mode: AlbumsMode;
     selectedAlbumId: number | null;
+    page: PageState;
   };
   setAlbumsMode: (m: AlbumsMode) => void;
   selectAlbum: (id: number | null) => void;
+  setAlbumsPage: (p: PageState["page"]) => void;
+  setAlbumsTotal: (total: PageState["total"]) => void;
+  setAlbumsPageSize: (size: PageState["pageSize"]) => void;
+
+  artists: { page: PageState };
+  setArtistsPage: (p: PageState["page"]) => void;
+  setArtistsTotal: (total: PageState["total"]) => void;
+  setArtistsPageSize: (size: PageState["pageSize"]) => void;
+
+  genres: { page: PageState };
+  setGenresPage: (p: PageState["page"]) => void;
+  setGenresTotal: (total: PageState["total"]) => void;
+  setGenresPageSize: (size: PageState["pageSize"]) => void;
+
+  years: { page: PageState };
+  setYearsPage: (p: PageState["page"]) => void;
+  setYearsTotal: (total: PageState["total"]) => void;
+  setYearsPageSize: (size: PageState["pageSize"]) => void;
 
   folders: {
     mode: FoldersMode;
     // Path of the directory we're inside; null = roots.
     cwd: string | null;
+    // Pagination of the per-cwd file grid (icons mode only).
+    page: PageState;
   };
   setFoldersMode: (m: FoldersMode) => void;
   setCwd: (path: string | null) => void;
+  setFoldersPage: (p: PageState["page"]) => void;
+  setFoldersTotal: (total: PageState["total"]) => void;
+  setFoldersPageSize: (size: PageState["pageSize"]) => void;
 
   // Library status
   library: LibraryStatus;
@@ -76,6 +130,17 @@ type Store = {
   // Scan progress
   scanning: number;
   bumpScanning: (delta: number) => void;
+
+  // Tick counter incremented on every successful scan; per-view pagination
+  // hooks depend on it so they re-fetch after scans even when nothing
+  // else changed.
+  refreshTick: number;
+  bumpRefreshTick: () => void;
+
+  // Single-track metadata changes (in-place edit) don't bump the scan
+  // tick but should refresh the affected page so the row reflects the
+  // new title/genre/etc.
+  bumpTracksRefresh: () => void;
 
   // Data per view
   tracksList: TrackRow[];
@@ -110,61 +175,223 @@ const initialTracksFilter: TracksFilter = {
   albumId: null,
 };
 
+// Pages slice shape used both for runtime typing and for `persist`'s
+// `partialize` (only page + pageSize go into localStorage; total is
+// recomputed on every mount).
+const PAGES_KEYS = [
+  "tracks",
+  "albums",
+  "artists",
+  "genres",
+  "years",
+  "folders",
+] as const;
+
+function pageOnlySlice(s: Store) {
+  const out: Record<string, unknown> = {};
+  for (const k of PAGES_KEYS) {
+    const v = s[k];
+    if (v && typeof v === "object" && "page" in v) {
+      const slot = v as { page: PageState };
+      out[k] = {
+        page: { page: slot.page.page, pageSize: slot.page.pageSize },
+      };
+    }
+  }
+  return out;
+}
+
 export const useStore = create<Store>()(
-  subscribeWithSelector((set) => ({
-    view: "tracks",
-    setView: (v) => set({ view: v }),
+  persist(
+    subscribeWithSelector((set) => ({
+      view: "tracks",
+      setView: (view) => set({ view }),
 
-    tracks: { mode: "icons", query: "", filter: { ...initialTracksFilter } },
-    setTracksMode: (mode) =>
-      set((s) => ({ tracks: { ...s.tracks, mode } })),
-    setTracksQuery: (query) =>
-      set((s) => ({ tracks: { ...s.tracks, query } })),
-    setTracksFilter: (filter) =>
-      set((s) => ({ tracks: { ...s.tracks, filter } })),
+      tracks: {
+        mode: "icons",
+        query: "",
+        filter: { ...initialTracksFilter },
+        page: DEFAULT_PAGE(),
+      },
+      setTracksMode: (mode) =>
+        set((s) => ({ tracks: { ...s.tracks, mode } })),
+      setTracksQuery: (query) =>
+        set((s) => ({ tracks: { ...s.tracks, query } })),
+      setTracksFilter: (filter) =>
+        set((s) => ({ tracks: { ...s.tracks, filter } })),
+      setTracksPage: (page) =>
+        set((s) => ({ tracks: { ...s.tracks, page: { ...s.tracks.page, page } } })),
+      setTracksTotal: (total) =>
+        set((s) => ({
+          tracks: { ...s.tracks, page: { ...s.tracks.page, total } },
+        })),
+      setTracksPageSize: (pageSize) =>
+        set((s) => ({
+          tracks: {
+            ...s.tracks,
+            page: {
+              ...s.tracks.page,
+              pageSize,
+              page: clampPageTo(
+                s.tracks.page.page,
+                s.tracks.page.total,
+                pageSize,
+              ),
+            },
+          },
+        })),
 
-    albums: { mode: "icons", selectedAlbumId: null },
-    setAlbumsMode: (mode) =>
-      set((s) => ({ albums: { ...s.albums, mode } })),
-    selectAlbum: (id) =>
-      set((s) => ({ albums: { ...s.albums, selectedAlbumId: id } })),
+      albums: { mode: "icons", selectedAlbumId: null, page: DEFAULT_PAGE() },
+      setAlbumsMode: (mode) =>
+        set((s) => ({ albums: { ...s.albums, mode } })),
+      selectAlbum: (id) =>
+        set((s) => ({ albums: { ...s.albums, selectedAlbumId: id } })),
+      setAlbumsPage: (page) =>
+        set((s) => ({ albums: { ...s.albums, page: { ...s.albums.page, page } } })),
+      setAlbumsTotal: (total) =>
+        set((s) => ({
+          albums: { ...s.albums, page: { ...s.albums.page, total } },
+        })),
+      setAlbumsPageSize: (pageSize) =>
+        set((s) => ({
+          albums: {
+            ...s.albums,
+            page: { ...s.albums.page, pageSize },
+          },
+        })),
 
-    folders: { mode: "icons", cwd: null },
-    setFoldersMode: (mode) =>
-      set((s) => ({ folders: { ...s.folders, mode } })),
-    setCwd: (cwd) => set((s) => ({ folders: { ...s.folders, cwd } })),
+      artists: { page: DEFAULT_PAGE() },
+      setArtistsPage: (page) =>
+        set((s) => ({ artists: { ...s.artists, page: { ...s.artists.page, page } } })),
+      setArtistsTotal: (total) =>
+        set((s) => ({
+          artists: { ...s.artists, page: { ...s.artists.page, total } },
+        })),
+      setArtistsPageSize: (pageSize) =>
+        set((s) => ({
+          artists: { ...s.artists, page: { ...s.artists.page, pageSize } },
+        })),
 
-    library: { path: null, last_error: null },
-    setLibrary: (library) => set({ library }),
+      genres: { page: DEFAULT_PAGE() },
+      setGenresPage: (page) =>
+        set((s) => ({ genres: { ...s.genres, page: { ...s.genres.page, page } } })),
+      setGenresTotal: (total) =>
+        set((s) => ({
+          genres: { ...s.genres, page: { ...s.genres.page, total } },
+        })),
+      setGenresPageSize: (pageSize) =>
+        set((s) => ({
+          genres: { ...s.genres, page: { ...s.genres.page, pageSize } },
+        })),
 
-    loading: false,
-    setLoading: (loading) => set({ loading }),
+      years: { page: DEFAULT_PAGE() },
+      setYearsPage: (page) =>
+        set((s) => ({ years: { ...s.years, page: { ...s.years.page, page } } })),
+      setYearsTotal: (total) =>
+        set((s) => ({
+          years: { ...s.years, page: { ...s.years.page, total } },
+        })),
+      setYearsPageSize: (pageSize) =>
+        set((s) => ({
+          years: { ...s.years, page: { ...s.years.page, pageSize } },
+        })),
 
-    scanning: 0,
-    bumpScanning: (delta) => set((s) => ({ scanning: s.scanning + delta })),
+      folders: {
+        mode: "icons",
+        cwd: null,
+        page: DEFAULT_PAGE(),
+      },
+      setFoldersMode: (mode) =>
+        set((s) => ({ folders: { ...s.folders, mode } })),
+      setCwd: (cwd) =>
+        set((s) => ({
+          folders: {
+            ...s.folders,
+            cwd,
+            page: { ...s.folders.page, page: 1, total: 0 },
+          },
+        })),
+      setFoldersPage: (page) =>
+        set((s) => ({
+          folders: { ...s.folders, page: { ...s.folders.page, page } },
+        })),
+      setFoldersTotal: (total) =>
+        set((s) => ({
+          folders: { ...s.folders, page: { ...s.folders.page, total } },
+        })),
+      setFoldersPageSize: (pageSize) =>
+        set((s) => ({
+          folders: { ...s.folders, page: { ...s.folders.page, pageSize } },
+        })),
 
-    tracksList: [],
-    setTracksList: (tracksList) => set({ tracksList }),
-    albumsList: [],
-    setAlbumsList: (albumsList) => set({ albumsList }),
-    genresList: [],
-    setGenresList: (genresList) => set({ genresList }),
-    yearsList: [],
-    setYearsList: (yearsList) => set({ yearsList }),
-    artistsList: [],
-    setArtistsList: (artistsList) => set({ artistsList }),
-    folderTree: { flat: [], root_children: [] },
-    setFolderTree: (folderTree) => set({ folderTree }),
+      library: { path: null, last_error: null },
+      setLibrary: (library) => set({ library }),
 
-    nowPlayingTrackId: null,
-    setNowPlayingTrackId: (nowPlayingTrackId) => set({ nowPlayingTrackId }),
-    nowPlayingTitle: "—",
-    nowPlayingArtist: "",
-    setNowPlaying: (nowPlayingTitle, nowPlayingArtist) =>
-      set({ nowPlayingTitle, nowPlayingArtist }),
-    playerSnapshot: null,
-    setPlayerSnapshot: (playerSnapshot) => set({ playerSnapshot }),
-    lyricsTrackId: null,
-    setLyricsTrackId: (lyricsTrackId) => set({ lyricsTrackId }),
-  })),
+      loading: false,
+      setLoading: (loading) => set({ loading }),
+
+      scanning: 0,
+      bumpScanning: (delta) => set((s) => ({ scanning: s.scanning + delta })),
+
+      refreshTick: 0,
+      bumpRefreshTick: () =>
+        set((s) => ({ refreshTick: s.refreshTick + 1 })),
+
+      bumpTracksRefresh: () =>
+        set((s) => ({ refreshTick: s.refreshTick + 1 })),
+
+      tracksList: [],
+      setTracksList: (tracksList) => set({ tracksList }),
+      albumsList: [],
+      setAlbumsList: (albumsList) => set({ albumsList }),
+      genresList: [],
+      setGenresList: (genresList) => set({ genresList }),
+      yearsList: [],
+      setYearsList: (yearsList) => set({ yearsList }),
+      artistsList: [],
+      setArtistsList: (artistsList) => set({ artistsList }),
+      folderTree: { flat: [], root_children: [] },
+      setFolderTree: (folderTree) => set({ folderTree }),
+
+      nowPlayingTrackId: null,
+      setNowPlayingTrackId: (nowPlayingTrackId) => set({ nowPlayingTrackId }),
+      nowPlayingTitle: "—",
+      nowPlayingArtist: "",
+      setNowPlaying: (nowPlayingTitle, nowPlayingArtist) =>
+        set({ nowPlayingTitle, nowPlayingArtist }),
+      playerSnapshot: null,
+      setPlayerSnapshot: (playerSnapshot) => set({ playerSnapshot }),
+      lyricsTrackId: null,
+      setLyricsTrackId: (lyricsTrackId) => set({ lyricsTrackId }),
+    })),
+    {
+      name: "mimir.ui",
+      version: 1,
+      // Persist only the page state we want to restore across app
+      // restarts. Runtime data (rows, library status, etc.) is always
+      // recomputed on next mount.
+      partialize: pageOnlySlice,
+    },
+  ),
 );
+
+/** Look up the per-view page state in one place. Returns null for
+ *  views that don't paginate (queue) or to keep callers honest. */
+export function selectPage(s: Store, v: ViewKey): PageState | null {
+  switch (v) {
+    case "tracks":
+      return s.tracks.page;
+    case "albums":
+      return s.albums.page;
+    case "artists":
+      return s.artists.page;
+    case "genres":
+      return s.genres.page;
+    case "years":
+      return s.years.page;
+    case "folders":
+      return s.folders.page;
+    default:
+      return null;
+  }
+}

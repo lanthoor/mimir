@@ -13,20 +13,33 @@ pub struct ArtistRow {
     pub track_count: i64,
 }
 
-/// Return every artist, sorted by `sort_name` (case-insensitive), with
-/// `NULL`s last, each with the track count across their albums.
-pub fn list_artists(conn: &Connection) -> Result<Vec<ArtistRow>, rusqlite::Error> {
-    mimir_telemetry::log("DEBUG", "query", "list_artists");
+/// Return up to `limit` artists starting at `offset`, sorted by
+/// `sort_name` (case-insensitive, NULLs last), with each artist's track
+/// count across their albums. `ar.id` is the final tiebreaker so
+/// diacritic-tied pages never duplicate rows.
+pub fn list_artists(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<ArtistRow>, rusqlite::Error> {
+    mimir_telemetry::log(
+        "DEBUG",
+        "query",
+        &format!("list_artists limit={limit} offset={offset}"),
+    );
     let mut stmt = conn.prepare(
         "SELECT ar.id, ar.name, ar.sort_name, COUNT(t.id) \
           FROM artist ar \
           LEFT JOIN album a ON a.album_artist_id = ar.id \
           LEFT JOIN track t ON t.album_id = a.id \
           GROUP BY ar.id \
-          ORDER BY ar.sort_name COLLATE NOCASE ASC, ar.name COLLATE NOCASE ASC",
+          ORDER BY ar.sort_name COLLATE NOCASE ASC, \
+                   ar.name COLLATE NOCASE ASC, \
+                   ar.id \
+          LIMIT ?1 OFFSET ?2",
     )?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(rusqlite::params![limit, offset], |row| {
             Ok(ArtistRow {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -41,4 +54,12 @@ pub fn list_artists(conn: &Connection) -> Result<Vec<ArtistRow>, rusqlite::Error
         &format!("list_artists returned n={}", rows.len()),
     );
     Ok(rows)
+}
+
+/// Total number of artists. Sibling of `list_artists`.
+pub fn count_artists(conn: &Connection) -> Result<i64, rusqlite::Error> {
+    mimir_telemetry::log("DEBUG", "query", "count_artists");
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM artist", [], |row| row.get(0))?;
+    mimir_telemetry::log("INFO", "query", &format!("count_artists ok n={n}"));
+    Ok(n)
 }
