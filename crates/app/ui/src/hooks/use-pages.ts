@@ -355,8 +355,16 @@ export function useFolderFilesPage(
   return { rows, total, loading: false };
 }
 
-/** AlbumDetail: pages the per-album track list. */
-export function useAlbumTracksPage(albumId: number | null) {
+/** Drill-down detail (album / genre / year / artist): pages the tracks
+ *  matching `filter`. Writes to `tracksList` / `tracks.page` so the
+ *  detail view's own pagination bar can drive it. */
+export function useFilteredTracksPage(
+  filter: Partial<import("@/lib/store").TracksFilter>,
+) {
+  const genre = filter.genre ?? null;
+  const year = filter.year ?? null;
+  const artistId = filter.artistId ?? null;
+  const albumId = filter.albumId ?? null;
   const setTracksList = useStore((s) => s.setTracksList);
   const page = useStore((s) => s.tracks.page.page);
   const pageSize = useStore((s) => s.tracks.page.pageSize);
@@ -365,8 +373,13 @@ export function useAlbumTracksPage(albumId: number | null) {
   const setTracksPage = useStore((s) => s.setTracksPage);
   const setLoading = useStore((s) => s.setLoading);
 
+  // Reset to page 1 when the filter changes.
   useEffect(() => {
-    if (albumId == null) return;
+    setTracksPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genre, year, artistId, albumId]);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
     (async () => {
@@ -374,11 +387,14 @@ export function useAlbumTracksPage(albumId: number | null) {
         const offset = Math.max(0, (page - 1) * pageSize);
         const [rows, total] = await Promise.all([
           ipc.libraryQueryTracks({
+            genre,
+            year,
+            artistId,
             albumId,
             limit: pageSize,
             offset,
           }),
-          ipc.libraryCountTracksFiltered({ albumId }),
+          ipc.libraryCountTracksFiltered({ genre, year, artistId, albumId }),
         ]);
         if (cancelled) return;
         setTracksTotal(total);
@@ -386,7 +402,7 @@ export function useAlbumTracksPage(albumId: number | null) {
         if (page > last) setTracksPage(last);
         setTracksList(rows);
       } catch (e) {
-        console.error("useAlbumTracksPage fetch failed:", e);
+        console.error("useFilteredTracksPage fetch failed:", e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -395,6 +411,9 @@ export function useAlbumTracksPage(albumId: number | null) {
       cancelled = true;
     };
   }, [
+    genre,
+    year,
+    artistId,
     albumId,
     page,
     pageSize,

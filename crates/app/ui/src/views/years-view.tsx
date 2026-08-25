@@ -5,12 +5,13 @@ import { Calendar } from "lucide-react";
 import { PaginationBar } from "@/components/pagination-bar";
 import { useYearsPage } from "@/hooks/use-pages";
 import { useVisibleFit } from "@/hooks/use-visible-fit";
+import { FilteredTracksDetail } from "@/views/filtered-tracks-detail";
 
 export function YearsView() {
   useYearsPage();
   const items = useStore((s) => s.yearsList);
-  const setView = useStore((s) => s.setView);
-  const setTracksFilter = useStore((s) => s.setTracksFilter);
+  const selectedYear = useStore((s) => s.years.selectedYear);
+  const selectYear = useStore((s) => s.selectYear);
   const page = useStore((s) => s.years.page);
   const setYearsPage = useStore((s) => s.setYearsPage);
   const setYearsPageSize = useStore((s) => s.setYearsPageSize);
@@ -28,6 +29,20 @@ export function YearsView() {
     onChange: setYearsPageSize,
   });
 
+  if (selectedYear != null) {
+    return (
+      <div className="flex h-full flex-col gap-2 p-4">
+        <FilteredTracksDetail
+          filter={{ year: selectedYear }}
+          rootLabel="Years"
+          currentLabel={String(selectedYear)}
+          icon={<Calendar className="h-5 w-5" />}
+          onBack={() => selectYear(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col gap-2 p-4">
       <div ref={containerRef} className="flex-1 overflow-hidden">
@@ -43,15 +58,7 @@ export function YearsView() {
                 key={y.year}
                 ref={i === 0 ? probeRef : null}
                 className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:border-primary"
-                onClick={() => {
-                  setTracksFilter({
-                    genre: null,
-                    year: y.year,
-                    artistId: null,
-                    albumId: null,
-                  });
-                  setView("tracks");
-                }}
+                onClick={() => selectYear(y.year)}
               >
                 <Calendar className="h-8 w-8 shrink-0 text-muted-foreground" />
                 <div>
