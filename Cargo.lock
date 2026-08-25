@@ -2101,7 +2101,7 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "mimir-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "mimir-audio",
@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "mimir-audio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mimir-telemetry",
  "rodio",
@@ -2130,7 +2130,7 @@ dependencies = [
 
 [[package]]
 name = "mimir-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "lofty",
@@ -2148,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "mimir-telemetry"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "miniz_oxide"

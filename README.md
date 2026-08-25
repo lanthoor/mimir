@@ -30,6 +30,6 @@ Pinned to **Rust 1.97.1** via `rust-toolchain.toml`. See
 
 MVP walking skeleton (S0) complete — ingests, indexes, browses (Tracks / Albums /
 **Artists** / Genres / Years / Folders), searches, and plays back. Release
-`0.1.0` tagged; Linux AppImage/.deb via `cargo tauri build`.
+`0.2.0`; Linux AppImage/.deb via `cargo tauri build`.
 
-Tier 2 (playback quality) is starting — see the [feature checklist](docs/Plan.md#feature-checklist) for exactly what is done.
+Tier 2 (playback quality) is in progress — see the [feature checklist](docs/Plan.md#feature-checklist) for exactly what is done.

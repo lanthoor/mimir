@@ -20,4 +20,4 @@ A desktop music catalog and player that watches folders, extracts/enriches metad
 
 ## Status
 
-Released `0.1.0`: the Tier 0 walking-skeleton MVP plus much of Tier 1 (library depth). Exact status per feature lives in the [feature checklist](Plan.md#feature-checklist).
+Released `0.2.0`: the Tier 0 walking-skeleton MVP plus much of Tier 1 (library depth) and the first Tier 2 playback-quality work. Exact status per feature lives in the [feature checklist](Plan.md#feature-checklist).
