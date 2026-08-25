@@ -114,24 +114,26 @@ export function PaginationBar({
   );
 }
 
+/// Build the list of numbered buttons + ellipses shown between prev/next.
+/// 1 and lastPage are always rendered so the user always sees the
+/// boundaries — including when sitting on one of them.
 function buildPageItems(page: number, lastPage: number): (number | "ellipsis")[] {
+  if (lastPage <= 1) return [];
   if (lastPage <= 7) {
     return Array.from({ length: lastPage }, (_, i) => i + 1);
   }
-  const items: (number | "ellipsis")[] = [];
-  const window: number[] = [page - 1, page, page + 1].filter(
-    (p) => p > 1 && p < lastPage,
-  );
-  if (page > 3) {
-    items.push(1, "ellipsis");
-  } else {
-    for (let p = 1; p < page; p++) items.push(p);
-  }
-  for (const p of window) items.push(p);
-  if (page < lastPage - 2) {
-    items.push("ellipsis", lastPage);
-  } else {
-    for (let p = page + 1; p <= lastPage; p++) items.push(p);
-  }
+
+  const items: (number | "ellipsis")[] = [1];
+
+  // Pages around `page`, exclusive of 1 and lastPage (which we render
+  // independently so they never disappear).
+  const start = Math.max(2, page - 1);
+  const end = Math.min(lastPage - 1, page + 1);
+
+  if (start > 2) items.push("ellipsis");
+  for (let p = start; p <= end; p++) items.push(p);
+  if (end < lastPage - 1) items.push("ellipsis");
+  items.push(lastPage);
+
   return items;
 }

@@ -25,9 +25,7 @@ export function TracksView() {
     <div className="flex h-full flex-col gap-2 p-4">
       <ViewToolbar view="tracks" />
       {filterChips.length > 0 && <FilterChips chips={filterChips} />}
-      <div className="flex-1 overflow-auto">
-        {mode === "list" ? <TracksList /> : <TracksIcons />}
-      </div>
+      {mode === "list" ? <TracksList /> : <TracksIcons />}
       <PaginationBar
         page={page.page}
         pageSize={page.pageSize}

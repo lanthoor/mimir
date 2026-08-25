@@ -1,29 +1,70 @@
+import { useRef, useState } from "react";
 import { Music } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useStore } from "@/lib/store";
 import * as ipc from "@/lib/ipc";
 import { EditTrackDialog } from "@/components/edit-track-dialog";
-import { useState } from "react";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { basename } from "@/lib/utils";
+import { useVisibleFit } from "@/hooks/use-visible-fit";
 
 export function TracksIcons() {
   const items = useStore((s) => s.tracksList);
-  if (items.length === 0) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">No tracks.</div>
-    );
-  }
+  const setTracksPageSize = useStore((s) => s.setTracksPageSize);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const probeRef = useRef<HTMLDivElement>(null);
+
+  const fit = useVisibleFit({
+    containerRef,
+    gridRef,
+    probeRef,
+    minCellWidth: 220,
+    gap: 12,
+    onChange: setTracksPageSize,
+  });
+
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
-      {items.map((t) => (
-        <TrackIcon key={t.id} track={t} />
-      ))}
+    <div ref={containerRef} className="flex-1 overflow-hidden">
+      {items.length === 0 ? (
+        <div className="p-6 text-sm text-muted-foreground">No tracks.</div>
+      ) : (
+        <div
+          ref={gridRef}
+          className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3"
+        >
+          {items.map((t, i) => (
+            <TrackIcon
+              key={t.id}
+              track={t}
+              probeRef={i === 0 ? probeRef : null}
+            />
+          ))}
+          {Array.from({
+            length: Math.max(0, fit.pageSize - items.length),
+          }).map((_, i) => (
+            <div
+              key={`pad-${i}`}
+              aria-hidden
+              className="invisible rounded-md border border-transparent"
+              style={{ height: fit.rowHeight || undefined }}
+              data-placeholder
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function TrackIcon({ track }: { track: import("@/lib/types").TrackRow }) {
+function TrackIcon({
+  track,
+  probeRef,
+}: {
+  track: import("@/lib/types").TrackRow;
+  probeRef: React.Ref<HTMLDivElement> | null;
+}) {
   const [editing, setEditing] = useState(false);
   const setNowPlaying = useStore((s) => s.setNowPlaying);
   const setNowPlayingTrackId = useStore((s) => s.setNowPlayingTrackId);
@@ -38,6 +79,7 @@ function TrackIcon({ track }: { track: import("@/lib/types").TrackRow }) {
         trackArtist={track.artist_name ?? ""}
       >
         <Card
+          ref={probeRef}
           className="flex cursor-pointer flex-col gap-1 p-3 transition-colors hover:border-primary"
           onDoubleClick={() => {
             setNowPlaying(track.title ?? "(untitled)", track.artist_name ?? "");

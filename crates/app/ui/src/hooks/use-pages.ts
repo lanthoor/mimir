@@ -14,7 +14,7 @@ import { useStore } from "@/lib/store";
  *  page / pageSize changes just refetch the current slice. */
 export function useTracksPage() {
   const filter = useStore((s) => s.tracks.filter);
-  const query = useStore((s) => s.tracks.query);
+  const query = useStore((s) => s.tracks.query) ?? "";
   const page = useStore((s) => s.tracks.page.page);
   const pageSize = useStore((s) => s.tracks.page.pageSize);
   const refreshTick = useStore((s) => s.refreshTick);
@@ -30,10 +30,10 @@ export function useTracksPage() {
     setTracksPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    filter.genre,
-    filter.year,
-    filter.artistId,
-    filter.albumId,
+    filter.genre ?? null,
+    filter.year ?? null,
+    filter.artistId ?? null,
+    filter.albumId ?? null,
     trimmed,
   ]);
 
@@ -110,10 +110,10 @@ export function useTracksPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    filter.genre,
-    filter.year,
-    filter.artistId,
-    filter.albumId,
+    filter.genre ?? null,
+    filter.year ?? null,
+    filter.artistId ?? null,
+    filter.albumId ?? null,
     trimmed,
     page,
     pageSize,

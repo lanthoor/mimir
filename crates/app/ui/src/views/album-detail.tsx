@@ -2,7 +2,6 @@ import { ArrowLeft, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlbumCover } from "@/components/album-cover";
-import { PaginationBar } from "@/components/pagination-bar";
 import { useStore } from "@/lib/store";
 import * as ipc from "@/lib/ipc";
 import { AlbumTracksTable } from "@/views/album-tracks-table";
@@ -12,16 +11,15 @@ import { useAlbumTracksPage } from "@/hooks/use-pages";
 type Props = { albumId: number };
 
 export function AlbumDetail({ albumId }: Props) {
-  // Page-fetching hook for the per-album tracks. Wraps `tracksList` /
-  // `tracks.page` so the rest of the SPA just reads the store.
+  // Page-fetching hook for the per-album tracks. Writes to `tracksList`
+  // / `tracks.page` so the parent `<AlbumsView>`'s pagination bar can
+  // drive this view's paging without a duplicate bar here.
   useAlbumTracksPage(albumId);
   const selectAlbum = useStore((s) => s.selectAlbum);
   const album = useStore((s) =>
     s.albumsList.find((a) => a.id === albumId),
   );
   const tracks = useStore((s) => s.tracksList);
-  const page = useStore((s) => s.tracks.page);
-  const setTracksPage = useStore((s) => s.setTracksPage);
   const setNowPlaying = useStore((s) => s.setNowPlaying);
   const setNowPlayingTrackId = useStore((s) => s.setNowPlayingTrackId);
   const setLyricsTrackId = useStore((s) => s.setLyricsTrackId);
@@ -96,15 +94,7 @@ export function AlbumDetail({ albumId }: Props) {
           No tracks indexed.
         </div>
       ) : (
-        <>
-          <AlbumTracksTable tracks={tracks} />
-          <PaginationBar
-            page={page.page}
-            pageSize={page.pageSize}
-            total={page.total}
-            onChange={setTracksPage}
-          />
-        </>
+        <AlbumTracksTable tracks={tracks} />
       )}
     </div>
   );

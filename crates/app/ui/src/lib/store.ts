@@ -201,6 +201,54 @@ function pageOnlySlice(s: Store) {
   return out;
 }
 
+/// Merge persisted page slice over the live store. The default zustand
+/// `persist` merge is a top-level shallow spread, which would replace
+/// the entire `tracks` slot (and each other view slot) with the
+/// persisted `{ page: {...} }` shape — wiping out `mode`, `query`,
+/// `filter` and crashing the page-fetch hook. We deep-merge each named
+/// view slot so persisted page state rides alongside the live state.
+function mergePersisted(
+  persisted: unknown,
+  current: Store,
+): Store {
+  const out: Record<string, unknown> = {
+    ...(current as unknown as Record<string, unknown>),
+  };
+  if (
+    persisted &&
+    typeof persisted === "object" &&
+    !Array.isArray(persisted)
+  ) {
+    const p = persisted as Record<string, unknown>;
+    for (const k of PAGES_KEYS) {
+      const slot = p[k];
+      if (
+        slot &&
+        typeof slot === "object" &&
+        "page" in slot &&
+        !Array.isArray(slot)
+      ) {
+        const persistedPage = (slot as { page: Partial<PageState> }).page;
+        const liveSlot = (current as unknown as Record<string, unknown>)[k] as
+          | { page: PageState }
+          | undefined;
+        if (liveSlot && typeof liveSlot === "object" && "page" in liveSlot) {
+          const next = liveSlot.page;
+          out[k] = {
+            ...liveSlot,
+            page: {
+              ...next,
+              page: persistedPage?.page ?? next.page,
+              pageSize: persistedPage?.pageSize ?? next.pageSize,
+            },
+          };
+        }
+      }
+    }
+  }
+  return out as unknown as Store;
+}
+
 export const useStore = create<Store>()(
   persist(
     subscribeWithSelector((set) => ({
@@ -366,11 +414,14 @@ export const useStore = create<Store>()(
     })),
     {
       name: "mimir.ui",
-      version: 1,
+      version: 2,
       // Persist only the page state we want to restore across app
       // restarts. Runtime data (rows, library status, etc.) is always
-      // recomputed on next mount.
+      // recomputed on next mount. v2 invalidates the v1 payload (which
+      // was stored with a shape that replaced the entire view slot on
+      // rehydrate and crashed the page-fetch hook).
       partialize: pageOnlySlice,
+      merge: mergePersisted,
     },
   ),
 );
