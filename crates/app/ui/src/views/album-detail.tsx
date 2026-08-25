@@ -1,4 +1,4 @@
-import { Play } from "lucide-react";
+import { LayoutGrid, List, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,7 +13,9 @@ import { AlbumCover } from "@/components/album-cover";
 import { useStore } from "@/lib/store";
 import * as ipc from "@/lib/ipc";
 import { AlbumTracksTable } from "@/views/album-tracks-table";
+import { TracksIcons } from "@/views/tracks-icons";
 import { PaginationBar } from "@/components/pagination-bar";
+import { ModeToggle2 } from "@/views/view-toolbar";
 import { addAlbumToQueue } from "@/lib/queue-actions";
 import { useFilteredTracksPage } from "@/hooks/use-pages";
 
@@ -30,6 +32,8 @@ export function AlbumDetail({ albumId }: Props) {
   const page = useStore((s) => s.tracks.page.page);
   const pageSize = useStore((s) => s.tracks.page.pageSize);
   const setTracksPage = useStore((s) => s.setTracksPage);
+  const mode = useStore((s) => s.tracks.mode);
+  const setTracksMode = useStore((s) => s.setTracksMode);
   const setNowPlaying = useStore((s) => s.setNowPlaying);
   const setNowPlayingTrackId = useStore((s) => s.setNowPlayingTrackId);
   const setLyricsTrackId = useStore((s) => s.setLyricsTrackId);
@@ -74,6 +78,14 @@ export function AlbumDetail({ albumId }: Props) {
           </div>
         </div>
         <div className="ml-auto flex gap-2">
+          <ModeToggle2
+            value={mode}
+            onChange={setTracksMode}
+            options={[
+              { value: "icons", label: <LayoutGrid className="h-4 w-4" /> },
+              { value: "list", label: <List className="h-4 w-4" /> },
+            ]}
+          />
           <Button
             variant="default"
             size="sm"
@@ -110,8 +122,10 @@ export function AlbumDetail({ albumId }: Props) {
         <div className="p-6 text-sm text-muted-foreground">
           No tracks indexed.
         </div>
-      ) : (
+      ) : mode === "list" ? (
         <AlbumTracksTable tracks={tracks} />
+      ) : (
+        <TracksIcons />
       )}
       <PaginationBar
         page={page}

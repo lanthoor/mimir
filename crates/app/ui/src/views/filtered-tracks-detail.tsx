@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LayoutGrid, List } from "lucide-react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -10,7 +11,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useStore } from "@/lib/store";
 import { AlbumTracksTable } from "@/views/album-tracks-table";
+import { TracksIcons } from "@/views/tracks-icons";
 import { PaginationBar } from "@/components/pagination-bar";
+import { ModeToggle2 } from "@/views/view-toolbar";
 import { useFilteredTracksPage } from "@/hooks/use-pages";
 
 type Props = {
@@ -51,6 +54,8 @@ export function FilteredTracksDetail({
   const page = useStore((s) => s.tracks.page.page);
   const pageSize = useStore((s) => s.tracks.page.pageSize);
   const setTracksPage = useStore((s) => s.setTracksPage);
+  const mode = useStore((s) => s.tracks.mode);
+  const setTracksMode = useStore((s) => s.setTracksMode);
 
   return (
     <div className="flex flex-1 flex-col gap-4">
@@ -75,13 +80,25 @@ export function FilteredTracksDetail({
         </div>
         <div className="text-2xl font-bold">{currentLabel}</div>
         <Badge variant="secondary">{total} tracks</Badge>
+        <div className="ml-auto">
+          <ModeToggle2
+            value={mode}
+            onChange={setTracksMode}
+            options={[
+              { value: "icons", label: <LayoutGrid className="h-4 w-4" /> },
+              { value: "list", label: <List className="h-4 w-4" /> },
+            ]}
+          />
+        </div>
       </div>
       {tracks.length === 0 ? (
         <div className="p-6 text-sm text-muted-foreground">
           No tracks indexed.
         </div>
-      ) : (
+      ) : mode === "list" ? (
         <AlbumTracksTable tracks={tracks} />
+      ) : (
+        <TracksIcons />
       )}
       <PaginationBar
         page={page}

@@ -74,7 +74,7 @@ type ModeToggle2Props<T extends string> = {
   options: { value: T; label: React.ReactNode }[];
 };
 
-function ModeToggle2<T extends string>({
+export function ModeToggle2<T extends string>({
   value,
   onChange,
   options,
