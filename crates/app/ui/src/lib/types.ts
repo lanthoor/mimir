@@ -114,6 +114,16 @@ export type FolderRow = {
   file_count: number;
 };
 
+export type ListFolderRow = {
+  id: number;
+  path: string;
+};
+
+export type TrackSearchPage = {
+  rows: TrackRow[];
+  total: number;
+};
+
 export type PlayerSnapshot = {
   state: string;
   current: string | null;

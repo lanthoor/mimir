@@ -8,6 +8,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Card } from "@/components/ui/card";
+import { PaginationBar } from "@/components/pagination-bar";
 import { useStore } from "@/lib/store";
 import { basename } from "@/lib/utils";
 import {
@@ -22,6 +23,7 @@ import { toast } from "sonner";
 import type { FolderFile, FolderNode } from "@/lib/types";
 import { EditTrackDialog } from "@/components/edit-track-dialog";
 import { addTracksToQueue, collectFolderTrackIds } from "@/lib/queue-actions";
+import { useFolderFilesPage } from "@/hooks/use-pages";
 
 export function FoldersIcons() {
   const tree = useStore((s) => s.folderTree);
@@ -31,14 +33,25 @@ export function FoldersIcons() {
   const setNowPlayingTrackId = useStore((s) => s.setNowPlayingTrackId);
   const setLyricsTrackId = useStore((s) => s.setLyricsTrackId);
   const setFolderTree = useStore((s) => s.setFolderTree);
+  const setFoldersPage = useStore((s) => s.setFoldersPage);
+  const foldersPage = useStore((s) => s.folders.page);
 
   const current = useMemo(() => {
     if (cwd == null) return null;
     return findByPath(tree.root_children, cwd);
   }, [tree, cwd]);
 
+  // Pages of files inside the visible directory (icons mode only).
+  // Roots are not paged — there are at most a handful of watched folders.
+  const pagedFiles = useFolderFilesPage(current?.folder_id ?? null);
+
+  // When `cwd` is null, ignore any stale file rows from the previous cwd.
+  const files = useMemo<FolderFile[]>(() => {
+    if (cwd == null) return [];
+    return pagedFiles.rows;
+  }, [cwd, pagedFiles.rows]);
+
   const nodes = current?.children ?? tree.root_children;
-  const files = current?.files ?? [];
 
   if (tree.root_children.length === 0) {
     return (
@@ -116,6 +129,14 @@ export function FoldersIcons() {
           </div>
         )}
       </div>
+      {current != null && (
+        <PaginationBar
+          page={foldersPage.page}
+          pageSize={foldersPage.pageSize}
+          total={foldersPage.total}
+          onChange={setFoldersPage}
+        />
+      )}
     </div>
   );
 }

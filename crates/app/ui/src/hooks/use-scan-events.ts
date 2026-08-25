@@ -7,12 +7,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import * as ipc from "@/lib/ipc";
 import { useStore } from "@/lib/store";
-import { useLibrary } from "./use-library";
 import type { ScanDonePayload, ScanErrorPayload } from "@/lib/types";
 
 export function useScanEvents() {
-  const { refreshAlbums, refresh } = useLibrary();
-
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
     let cancelled = false;
@@ -26,9 +23,10 @@ export function useScanEvents() {
           summariseScan(path, summary),
           { id: `scan-${path}` },
         );
-        // Refresh whatever view is active so the new tracks show up.
-        refresh().catch(console.error);
-        refreshAlbums().catch(console.error);
+        // Bump the per-view pagination tick so every active pagination
+        // hook re-fetches (re-count, clamp to lastPage, re-rows). This
+        // intentionally preserves the user's current page number.
+        useStore.getState().bumpRefreshTick();
       });
       if (cancelled) {
         u1();
@@ -53,7 +51,7 @@ export function useScanEvents() {
       cancelled = true;
       for (const u of unlistens) u();
     };
-  }, [refresh, refreshAlbums]);
+  }, []);
 }
 
 function summariseScan(path: string, s: ScanDonePayload["summary"]): string {

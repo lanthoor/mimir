@@ -304,6 +304,32 @@ impl AppState {
         Ok(out)
     }
 
+    pub fn search_tracks_page(
+        &self,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<mimir_core::query::TrackSearchPage, AppError> {
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("search_tracks_page query={query:?} limit={limit} offset={offset}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let page = mimir_core::query::search_tracks_page(&conn, query, limit, offset)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!(
+                "search_tracks_page ok n={} total={}",
+                page.rows.len(),
+                page.total
+            ),
+        );
+        Ok(page)
+    }
+
     /// Folders-view backing list (one row per watched root).
     #[cfg(feature = "tauri")]
     pub fn list_folders(&self) -> Result<Vec<crate::command::FolderRow>, AppError> {
@@ -325,6 +351,84 @@ impl AppState {
             .collect();
         telemetry::log("INFO", "app", &format!("list_folders ok n={}", rows.len()));
         Ok(rows)
+    }
+
+    /// Paginated watched-folder list (active roots only, in `added_at`
+    /// order). Sibling to `list_folders`: that one keeps the recursive
+    /// `file_count` per row for the toolbar detail; this one is just the
+    /// id + path entries used for pagination of the toolbar's root list.
+    #[cfg(feature = "tauri")]
+    pub fn list_listed_folders(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::ListFolderRow>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("list_listed_folders limit={limit} offset={offset}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_listed_folders(&conn, limit, offset)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("list_listed_folders ok n={}", out.len()),
+        );
+        Ok(out)
+    }
+
+    #[cfg(feature = "tauri")]
+    pub fn count_listed_folders(&self) -> Result<i64, AppError> {
+        telemetry::log("DEBUG", "app", "count_listed_folders request");
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let n = mimir_core::query::count_listed_folders(&conn)?;
+        telemetry::log("INFO", "app", &format!("count_listed_folders ok n={n}"));
+        Ok(n)
+    }
+
+    /// Paginated audio files inside a single watched folder.
+    #[cfg(feature = "tauri")]
+    pub fn list_folder_files(
+        &self,
+        folder_id: i64,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::FolderFile>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("list_folder_files folder_id={folder_id} limit={limit} offset={offset}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_folder_files(&conn, folder_id, limit, offset)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("list_folder_files ok n={}", out.len()),
+        );
+        Ok(out)
+    }
+
+    #[cfg(feature = "tauri")]
+    pub fn count_folder_files(&self, folder_id: i64) -> Result<i64, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("count_folder_files folder_id={folder_id}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let n = mimir_core::query::count_folder_files(&conn, folder_id)?;
+        telemetry::log(
+            "INFO",
+            "app",
+            &format!("count_folder_files folder_id={folder_id} ok n={n}"),
+        );
+        Ok(n)
     }
 
     /// Full folder tree for the Folders view (icon + tree shapes).
@@ -593,34 +697,94 @@ impl AppState {
         Ok(out)
     }
 
-    /// Distinct genres in the library.
-    pub fn list_genres(&self) -> Result<Vec<mimir_core::query::GenreRow>, AppError> {
-        telemetry::log("DEBUG", "app", "list_genres request");
+    pub fn count_albums(&self) -> Result<i64, AppError> {
+        telemetry::log("DEBUG", "app", "count_albums request");
         let lib = self.library()?;
         let conn = lib.conn()?;
-        let out = mimir_core::query::list_genres(&conn)?;
+        let n = mimir_core::query::count_albums(&conn)?;
+        telemetry::log("INFO", "app", &format!("count_albums ok n={n}"));
+        Ok(n)
+    }
+
+    /// Distinct genres in the library.
+    pub fn list_genres(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::GenreRow>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("list_genres limit={limit} offset={offset}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_genres(&conn, limit, offset)?;
         telemetry::log("INFO", "app", &format!("list_genres ok n={}", out.len()));
         Ok(out)
     }
 
-    /// All artists (with track counts) in the library.
-    pub fn list_artists(&self) -> Result<Vec<mimir_core::query::ArtistRow>, AppError> {
-        telemetry::log("DEBUG", "app", "list_artists request");
+    pub fn count_genres(&self) -> Result<i64, AppError> {
+        telemetry::log("DEBUG", "app", "count_genres request");
         let lib = self.library()?;
         let conn = lib.conn()?;
-        let out = mimir_core::query::list_artists(&conn)?;
+        let n = mimir_core::query::count_genres(&conn)?;
+        telemetry::log("INFO", "app", &format!("count_genres ok n={n}"));
+        Ok(n)
+    }
+
+    /// All artists (with track counts) in the library.
+    pub fn list_artists(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::ArtistRow>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("list_artists limit={limit} offset={offset}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_artists(&conn, limit, offset)?;
         telemetry::log("INFO", "app", &format!("list_artists ok n={}", out.len()));
         Ok(out)
     }
 
-    /// Distinct years (from albums) in the library.
-    pub fn list_years(&self) -> Result<Vec<mimir_core::query::YearRow>, AppError> {
-        telemetry::log("DEBUG", "app", "list_years request");
+    pub fn count_artists(&self) -> Result<i64, AppError> {
+        telemetry::log("DEBUG", "app", "count_artists request");
         let lib = self.library()?;
         let conn = lib.conn()?;
-        let out = mimir_core::query::list_years(&conn)?;
+        let n = mimir_core::query::count_artists(&conn)?;
+        telemetry::log("INFO", "app", &format!("count_artists ok n={n}"));
+        Ok(n)
+    }
+
+    /// Distinct years (from albums) in the library.
+    pub fn list_years(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<mimir_core::query::YearRow>, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!("list_years limit={limit} offset={offset}"),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let out = mimir_core::query::list_years(&conn, limit, offset)?;
         telemetry::log("INFO", "app", &format!("list_years ok n={}", out.len()));
         Ok(out)
+    }
+
+    pub fn count_years(&self) -> Result<i64, AppError> {
+        telemetry::log("DEBUG", "app", "count_years request");
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let n = mimir_core::query::count_years(&conn)?;
+        telemetry::log("INFO", "app", &format!("count_years ok n={n}"));
+        Ok(n)
     }
 
     /// Tracks filtered by an optional combination of facets.
@@ -640,6 +804,15 @@ impl AppState {
         let out = mimir_core::query::list_tracks(&conn, limit, offset)?;
         telemetry::log("INFO", "app", &format!("list_tracks ok n={}", out.len()));
         Ok(out)
+    }
+
+    pub fn count_tracks(&self) -> Result<i64, AppError> {
+        telemetry::log("DEBUG", "app", "count_tracks request");
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let n = mimir_core::query::count_tracks(&conn)?;
+        telemetry::log("INFO", "app", &format!("count_tracks ok n={n}"));
+        Ok(n)
     }
 
     /// Tracks filtered by an optional combination of facets.
@@ -675,6 +848,33 @@ impl AppState {
             &format!("query_tracks_filtered ok n={}", out.len()),
         );
         Ok(out)
+    }
+
+    pub fn count_tracks_filtered(
+        &self,
+        genre: Option<String>,
+        year: Option<i32>,
+        artist_id: Option<i64>,
+        album_id: Option<i64>,
+    ) -> Result<i64, AppError> {
+        telemetry::log(
+            "DEBUG",
+            "app",
+            &format!(
+                "count_tracks_filtered genre={genre:?} year={year:?} artist_id={artist_id:?} album_id={album_id:?}"
+            ),
+        );
+        let lib = self.library()?;
+        let conn = lib.conn()?;
+        let filter = mimir_core::query::TrackFilter {
+            genre,
+            year,
+            artist_id,
+            album_id,
+        };
+        let n = mimir_core::query::count_tracks_filtered(&conn, &filter)?;
+        telemetry::log("INFO", "app", &format!("count_tracks_filtered ok n={n}"));
+        Ok(n)
     }
 
     /// Fetch the editable subset of a track.

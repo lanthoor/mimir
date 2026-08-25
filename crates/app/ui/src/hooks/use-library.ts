@@ -1,5 +1,9 @@
 // Library refresh + status. All IPC errors bubble up to the caller so
 // views can surface them.
+//
+// The per-view pagination hooks (`use-pages.ts`) own rows/list fetching
+// now. This hook is only left with status refresh and the folder tree
+// fetch (which is consumed by the Folders view, not by pagination).
 
 import { useCallback } from "react";
 import { toast } from "sonner";
@@ -7,18 +11,9 @@ import * as ipc from "@/lib/ipc";
 import { useStore } from "@/lib/store";
 
 export function useLibrary() {
-  const view = useStore((s) => s.view);
-  const tracksFilter = useStore((s) => s.tracks.filter);
-  const tracksQuery = useStore((s) => s.tracks.query);
-  const setLoading = useStore((s) => s.setLoading);
   const setLibrary = useStore((s) => s.setLibrary);
-  const setTracksList = useStore((s) => s.setTracksList);
-  const setAlbumsList = useStore((s) => s.setAlbumsList);
-  const setGenresList = useStore((s) => s.setGenresList);
-  const setYearsList = useStore((s) => s.setYearsList);
-  const setArtistsList = useStore((s) => s.setArtistsList);
+  const setLoading = useStore((s) => s.setLoading);
   const setFolderTree = useStore((s) => s.setFolderTree);
-  const setCwd = useStore((s) => s.setCwd);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -30,90 +25,22 @@ export function useLibrary() {
     }
   }, [setLibrary]);
 
-  const refreshAlbums = useCallback(async () => {
-    const albums = await ipc.libraryListAlbums(200, 0);
-    setAlbumsList(albums);
-    // Covers are not fetched here — each `<img>` points at the host's
-    // `mimircover://localhost/cover/{id}` protocol URL and the webview
-    // loads + caches them natively. (The old design pulled every cover's
-    // bytes over IPC and turned them into data: URLs; depending the
-    // refresh callback on that cache also created an infinite
-    // re-fetch loop that froze the main thread until the OS killed the
-    // window.)
-  }, [setAlbumsList]);
-
-  const refresh = useCallback(async () => {
+  // Folder tree refresh: file additions / removals shift the directory
+  // layout, so the Folders view re-fetches its tree on scan complete.
+  const refreshFolders = useCallback(async () => {
     setLoading(true);
     try {
-      if (view === "tracks") {
-        const filter = tracksFilter;
-        const hasFilter = Object.values(filter).some((v) => v != null);
-        const q = tracksQuery.trim();
-        let rows;
-        if (hasFilter) {
-          rows = await ipc.libraryQueryTracks({
-            genre: filter.genre,
-            year: filter.year,
-            artistId: filter.artistId,
-            albumId: filter.albumId,
-          });
-        } else if (q.length > 0) {
-          rows = await ipc.librarySearch(q, 100);
-        } else {
-          rows = await ipc.libraryListTracks(100, 0);
-        }
-        setTracksList(rows);
-      } else if (view === "albums") {
-        await refreshAlbums();
-      } else if (view === "genres") {
-        setGenresList(await ipc.libraryListGenres());
-      } else if (view === "years") {
-        setYearsList(await ipc.libraryListYears());
-      } else if (view === "artists") {
-        setArtistsList(await ipc.libraryListArtists());
-      } else if (view === "folders") {
-        const tree = await ipc.libraryFolderTree();
-        setFolderTree(tree);
-        // Drop cwd if it no longer resolves.
-        const cwd = useStore.getState().folders.cwd;
-        if (cwd != null) {
-          const stillThere = findByPath(tree.root_children, cwd);
-          if (!stillThere) setCwd(null);
-        }
-      }
+      const tree = await ipc.libraryFolderTree();
+      setFolderTree(tree);
     } catch (e) {
-      console.error("refresh failed:", e);
-      toast.error(`Refresh failed: ${describeError(e)}`);
+      console.error("library_folder_tree failed:", e);
+      toast.error(`Folders refresh failed: ${describeError(e)}`);
     } finally {
       setLoading(false);
     }
-  }, [
-    view,
-    tracksFilter,
-    tracksQuery,
-    setLoading,
-    setTracksList,
-    setGenresList,
-    setYearsList,
-    setArtistsList,
-    setFolderTree,
-    setCwd,
-    refreshAlbums,
-  ]);
+  }, [setFolderTree, setLoading]);
 
-  return { refresh, refreshStatus, refreshAlbums };
-}
-
-function findByPath(
-  nodes: import("@/lib/types").FolderNode[],
-  path: string,
-): import("@/lib/types").FolderNode | null {
-  for (const n of nodes) {
-    if (n.path === path) return n;
-    const inChild = findByPath(n.children, path);
-    if (inChild) return inChild;
-  }
-  return null;
+  return { refreshStatus, refreshFolders };
 }
 
 function describeError(e: unknown): string {

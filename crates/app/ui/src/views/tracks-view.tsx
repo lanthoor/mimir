@@ -3,8 +3,11 @@ import { useStore } from "@/lib/store";
 import { TracksIcons } from "@/views/tracks-icons";
 import { TracksList } from "@/views/tracks-list";
 import { ViewToolbar } from "@/views/view-toolbar";
+import { PaginationBar } from "@/components/pagination-bar";
+import { useTracksPage } from "@/hooks/use-pages";
 
 export function TracksView() {
+  useTracksPage();
   const mode = useStore((s) => s.tracks.mode);
   const filterChips = useMemo(() => {
     const f = useStore.getState().tracks.filter;
@@ -15,14 +18,20 @@ export function TracksView() {
       f.albumId != null ? { key: "album", label: `album=${f.albumId}` } : null,
     ].filter((c): c is { key: string; label: string } => c !== null);
   }, [useStore((s) => s.tracks.filter)]);
+  const page = useStore((s) => s.tracks.page);
+  const setTracksPage = useStore((s) => s.setTracksPage);
 
   return (
     <div className="flex h-full flex-col gap-2 p-4">
       <ViewToolbar view="tracks" />
       {filterChips.length > 0 && <FilterChips chips={filterChips} />}
-      <div className="flex-1 overflow-auto">
-        {mode === "list" ? <TracksList /> : <TracksIcons />}
-      </div>
+      {mode === "list" ? <TracksList /> : <TracksIcons />}
+      <PaginationBar
+        page={page.page}
+        pageSize={page.pageSize}
+        total={page.total}
+        onChange={setTracksPage}
+      />
     </div>
   );
 }

@@ -5,8 +5,10 @@ use rusqlite::Connection;
 use crate::db::Library;
 use crate::metadata::ingest;
 use crate::query::{
-    list_albums, list_artists, list_genres, list_tracks, list_tracks_filtered, list_years,
-    search_tracks, AlbumRow, ArtistRow, TrackFilter, TrackRow,
+    count_albums, count_artists, count_folder_files, count_genres, count_tracks,
+    count_tracks_filtered, count_years, list_albums, list_artists, list_folder_files, list_genres,
+    list_tracks, list_tracks_filtered, list_years, search_tracks, search_tracks_page, AlbumRow,
+    ArtistRow, TrackFilter, TrackRow,
 };
 use crate::scanner::{hash_file, ScanJob};
 
@@ -63,6 +65,9 @@ fn list_tracks_returns_all_with_pagination() {
     let combined: std::collections::HashSet<_> = p1.iter().chain(p2.iter()).map(|t| t.id).collect();
     let total_ids: std::collections::HashSet<_> = total.iter().map(|t| t.id).collect();
     assert_eq!(combined, total_ids);
+
+    // Count sibling must agree with the page-bounded total.
+    assert_eq!(count_tracks(&conn).expect("count"), 3);
 }
 
 #[test]
@@ -96,6 +101,30 @@ fn list_albums_joins_artist_name() {
     for a in &albums {
         assert_eq!(a.artist_name.as_deref(), Some("Radiohead"));
     }
+
+    // Count sibling must agree.
+    assert_eq!(count_albums(&conn).expect("count"), 2);
+
+    // Paginating at limit=1, offset=1 must give exactly the second album
+    // in id order with no overlap with the first page.
+    let p1: std::collections::HashSet<_> = list_albums(&conn, 1, 0)
+        .expect("p1")
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    let p2: std::collections::HashSet<_> = list_albums(&conn, 1, 1)
+        .expect("p2")
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    let all: std::collections::HashSet<_> = list_albums(&conn, 100, 0)
+        .expect("all")
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    let union: std::collections::HashSet<_> = p1.iter().chain(p2.iter()).copied().collect();
+    assert_eq!(union, all);
+    assert!(p1.is_disjoint(&p2));
 }
 
 #[test]
@@ -114,7 +143,7 @@ fn list_artists_is_sorted_by_sort_name() {
     );
     seed_track(root.path(), &conn, "Múm/Finally We Are/01 - We.mp3", "We");
 
-    let artists: Vec<ArtistRow> = list_artists(&conn).expect("list");
+    let artists: Vec<ArtistRow> = list_artists(&conn, 100, 0).expect("list");
     assert_eq!(artists.len(), 3, "expected 3 artists, got {artists:?}");
 
     let by_name: std::collections::HashMap<&str, i64> = artists
@@ -211,7 +240,7 @@ fn list_genres_groups_and_counts_by_genre() {
         .expect("track");
     }
 
-    let genres = list_genres(&conn).expect("list");
+    let genres = list_genres(&conn, 100, 0).expect("list");
     assert_eq!(genres.len(), 2);
     assert_eq!(genres[0].name, "Electronic");
     assert_eq!(genres[0].track_count, 2);
@@ -270,7 +299,7 @@ fn list_years_groups_and_counts_by_album_year() {
         }
     }
 
-    let years = list_years(&conn).expect("list");
+    let years = list_years(&conn, 100, 0).expect("list");
     let pairs: Vec<(i32, i64)> = years.iter().map(|y| (y.year, y.track_count)).collect();
     assert_eq!(pairs, vec![(1997, 2), (2000, 1)]);
 }
@@ -437,6 +466,17 @@ fn list_tracks_filtered_pagination() {
     assert_eq!(p2.len(), 1, "third page holds the leftover row");
     let ids: std::collections::HashSet<_> = p1.iter().chain(p2.iter()).map(|t| t.id).collect();
     assert_eq!(ids.len(), 3);
+
+    // Count sibling must agree with the page-bounded total.
+    let total = count_tracks_filtered(
+        &conn,
+        &TrackFilter {
+            genre: Some("Electronic".into()),
+            ..TrackFilter::default()
+        },
+    )
+    .expect("count");
+    assert_eq!(total, 3);
 }
 
 fn touch_dir_chain(root: &std::path::Path, segments: &[&str]) -> std::path::PathBuf {
@@ -541,4 +581,227 @@ fn list_folders_skips_inactive_roots() {
         "inactive roots must not surface"
     );
     assert!(view.flat.is_empty());
+}
+
+#[test]
+fn list_artists_paginates_no_dupes_and_count_matches() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+
+    // Three distinct artists + the seeded "Unknown Artist" placeholder.
+    seed_track(root.path(), &conn, "Björk/Homogenic/01.mp3", "Hunter");
+    seed_track(root.path(), &conn, "Múm/Finally/01.mp3", "We");
+    seed_track(root.path(), &conn, "Aphex Twin/Selected/01.mp3", "Xtal");
+
+    let p1: std::collections::HashSet<_> = list_artists(&conn, 2, 0)
+        .expect("p1")
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    let p2: std::collections::HashSet<_> = list_artists(&conn, 2, 2)
+        .expect("p2")
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    let all: std::collections::HashSet<_> = list_artists(&conn, 100, 0)
+        .expect("all")
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+
+    assert_eq!(p1.len(), 2);
+    assert!(p1.is_disjoint(&p2));
+    let union: std::collections::HashSet<_> = p1.iter().chain(p2.iter()).copied().collect();
+    assert_eq!(union, all);
+
+    // Count sibling must agree.
+    assert_eq!(
+        count_artists(&conn).expect("count"),
+        i64::try_from(all.len()).unwrap()
+    );
+}
+
+#[test]
+fn list_genres_paginates_no_dupes_and_count_matches() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+
+    // Seed five distinct genres via direct inserts to keep the test cheap.
+    for (i, name) in ["Electronic", "Pop", "Rock", "Jazz", "Classical"]
+        .into_iter()
+        .enumerate()
+    {
+        let i = i64::try_from(i).expect("test index fits i64");
+        let path = format!("/t-{i}.mp3");
+        conn.execute(
+            "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, genre) \
+             VALUES (?1, ?5, 0, 0, 'mp3', 't', ?2)",
+            rusqlite::params![path, name, i, i, i + 100],
+        )
+        .expect("track");
+        let _ = root;
+    }
+
+    let p1: Vec<_> = list_genres(&conn, 2, 0).expect("p1");
+    let p2: Vec<_> = list_genres(&conn, 2, 2).expect("p2");
+    let p3: Vec<_> = list_genres(&conn, 2, 4).expect("p3");
+    let all: Vec<_> = list_genres(&conn, 100, 0).expect("all");
+    assert_eq!(p1.len(), 2);
+    assert_eq!(p2.len(), 2);
+    assert_eq!(p3.len(), 1, "tail page holds the single leftover row");
+    let names: std::collections::HashSet<_> = all.iter().map(|g| g.name.clone()).collect();
+    assert_eq!(names.len(), 5);
+    let union: std::collections::HashSet<_> = p1
+        .iter()
+        .chain(p2.iter())
+        .chain(p3.iter())
+        .map(|g| g.name.clone())
+        .collect();
+    assert_eq!(union.len(), 5, "no overlaps across pages");
+    assert_eq!(union, names);
+
+    // Count sibling must agree.
+    assert_eq!(count_genres(&conn).expect("count"), 5);
+}
+
+#[test]
+fn list_years_paginates_no_dupes_and_count_matches() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+
+    let artist_id: i64 = conn
+        .query_row(
+            "INSERT INTO artist (name, sort_name) VALUES ('R', 'r') RETURNING id",
+            [],
+            |r| r.get(0),
+        )
+        .expect("artist");
+
+    for (track_idx, (album_title, year)) in (0_i64..).zip([
+        ("A", 1997_i32),
+        ("B", 2000),
+        ("C", 2003),
+        ("D", 2006),
+        ("E", 2009),
+    ]) {
+        conn.execute(
+            "INSERT INTO album (title, album_artist_id, year) VALUES (?1, ?2, ?3)",
+            rusqlite::params![album_title, artist_id, year],
+        )
+        .expect("album");
+        let album_id: i64 = conn
+            .query_row("SELECT last_insert_rowid()", [], |r| r.get(0))
+            .expect("album id");
+        conn.execute(
+            "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, title, album_id) \
+             VALUES (?1, ?3, 0, 0, 'mp3', 't', ?2)",
+            rusqlite::params![format!("/{album_title}.mp3"), album_id, track_idx + 10],
+        )
+        .expect("track");
+    }
+
+    let p1: Vec<_> = list_years(&conn, 2, 0).expect("p1");
+    let p2: Vec<_> = list_years(&conn, 2, 2).expect("p2");
+    let p3: Vec<_> = list_years(&conn, 2, 4).expect("p3");
+    let all: Vec<_> = list_years(&conn, 100, 0).expect("all");
+    assert_eq!(all.len(), 5);
+    assert_eq!(p1.len(), 2);
+    assert_eq!(p2.len(), 2);
+    assert_eq!(p3.len(), 1, "tail page holds the single leftover row");
+    let mut years_seen: std::collections::HashSet<i32> = std::collections::HashSet::new();
+    for y in p1.iter().chain(p2.iter()).chain(p3.iter()) {
+        years_seen.insert(y.year);
+    }
+    let years_total: std::collections::HashSet<i32> = all.iter().map(|y| y.year).collect();
+    assert_eq!(years_seen, years_total);
+
+    // Count sibling must agree.
+    assert_eq!(count_years(&conn).expect("count"), 5);
+}
+
+#[test]
+fn search_tracks_page_total_matches_rows() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+
+    seed_track(root.path(), &conn, "A/01.mp3", "Money");
+    seed_track(root.path(), &conn, "B/02.mp3", "Time");
+    seed_track(root.path(), &conn, "C/03.mp3", "Breathe");
+
+    // FTS hit: total must equal the number of matching tracks.
+    let page = search_tracks_page(&conn, "money", 50, 0).expect("page");
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.total, 1);
+
+    let page = search_tracks_page(&conn, "time OR breathe", 50, 0).expect("page");
+    assert_eq!(page.rows.len(), 2);
+    assert_eq!(page.total, 2);
+
+    // Page slicing must not change total.
+    let page = search_tracks_page(&conn, "time OR breathe", 1, 0).expect("page");
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.total, 2);
+
+    // LIKE fallback path: total must match the row count of the LIKE query.
+    let page = search_tracks_page(&conn, "m", 50, 0).expect("page");
+    assert!(page.total >= 1, "LIKE fallback should find at least Money");
+    assert_eq!(
+        usize::try_from(page.total).expect("total fits usize"),
+        page.rows.len(),
+        "LIKE fallback single-page fetch: rows equals total"
+    );
+}
+
+#[test]
+fn list_folder_files_paginates_no_dupes_and_count_matches() {
+    let lib = Library::in_memory().expect("in-memory");
+    let conn = lib.conn().expect("conn");
+    let root = tempfile::tempdir().expect("tempdir");
+    let dir = root.path().join("music");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let folder_id = crate::scanner::upsert_folder(&conn, &dir).expect("folder");
+
+    // Seed 55 tracks so paging (limit=20) crosses the boundary twice.
+    for i in 0..55 {
+        let path = dir.join(format!("t-{i:03}.mp3"));
+        std::fs::write(&path, b"x").expect("write");
+        conn.execute(
+            "INSERT INTO track (path, path_hash, mtime_ns, size_bytes, codec, folder_id) \
+             VALUES (?1, RANDOMBLOB(16), 0, 0, 'mp3', ?2)",
+            rusqlite::params![path.to_string_lossy(), folder_id],
+        )
+        .expect("track");
+    }
+
+    let total = count_folder_files(&conn, folder_id).expect("count");
+    assert_eq!(total, 55);
+
+    let p1: std::collections::HashSet<_> = list_folder_files(&conn, folder_id, 20, 0)
+        .expect("p1")
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    let p2: std::collections::HashSet<_> = list_folder_files(&conn, folder_id, 20, 20)
+        .expect("p2")
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    let p3: std::collections::HashSet<_> = list_folder_files(&conn, folder_id, 20, 40)
+        .expect("p3")
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    assert_eq!(p1.len(), 20);
+    assert_eq!(p2.len(), 20);
+    assert_eq!(p3.len(), 15, "tail page must hold the 15 leftover rows");
+    let union: std::collections::HashSet<_> = p1
+        .iter()
+        .chain(p2.iter())
+        .chain(p3.iter())
+        .cloned()
+        .collect();
+    assert_eq!(union.len(), 55, "no overlaps across pages");
 }

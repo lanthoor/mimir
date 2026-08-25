@@ -39,7 +39,7 @@ function ViewRouter() {
 }
 
 function LibraryBootstrap() {
-  const { refresh, refreshStatus } = useLibrary();
+  const { refreshFolders, refreshStatus } = useLibrary();
   const view = useStore((s) => s.view);
   useScanEvents();
 
@@ -47,9 +47,14 @@ function LibraryBootstrap() {
     refreshStatus().catch(console.error);
   }, [refreshStatus]);
 
+  // Folders view's tree data needs an explicit fetch on view-entry
+  // (it isn't covered by the per-view pagination hooks — those own
+  // page-based lists, not the recursive directory walk).
   useEffect(() => {
-    refresh().catch(console.error);
-  }, [refresh, view]);
+    if (view === "folders") {
+      refreshFolders().catch(console.error);
+    }
+  }, [view, refreshFolders]);
 
   return null;
 }

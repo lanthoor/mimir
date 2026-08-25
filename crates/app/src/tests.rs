@@ -245,7 +245,7 @@ fn list_artists_returns_inserted_artists() {
     let artist_id = upsert_artist(&conn, "Björk").expect("artist");
     upsert_album(&conn, "Homogénic", artist_id, Some(1997)).expect("album");
 
-    let rows = state.list_artists().expect("list");
+    let rows = state.list_artists(100, 0).expect("list");
     // Migration 0004 seeds "Unknown Artist" — expect Björk plus that placeholder.
     let names: Vec<String> = rows.iter().map(|a| a.name.clone()).collect();
     assert!(
