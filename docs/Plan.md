@@ -21,6 +21,8 @@ means it is implemented and shipped (or at CI-green on `main`).
 | Tag extraction (embedded: ID3v2, Vorbis, APE, MP4) via `lofty` | ☑ |
 | Folder/filename heuristics fallback | ☑ |
 | Views: Tracks / Albums / Artists / Genres / Years / Folders | ☑ |
+| Pagination on all list views (dynamic page sizing) | ☑ |
+| Drill-down navigation (album / genre / year / artist) with breadcrumbs | ☑ |
 | Views: Playlists | ☐ |
 | Full-text search | ☑ |
 | Search: field operators (`artist:"foo" year:>2000`) | ☐ |
@@ -242,3 +244,12 @@ Each tier after S0 deepens one axis; nothing cross-cuts until a tier lands.
 | S4 | Enrichment opt-in; offline behaviour verified. |
 | S5 | Listening stats match ground truth on a hand-checked window. |
 | S6 | Signed installs + auto-update green on all 3 OSes. |
+
+---
+
+## Releases
+
+| Version | Scope |
+|---------|-------|
+| `0.1.0` | Tier 0 walking-skeleton MVP plus much of Tier 1 (library depth) and the first Tier 2 playback-quality work (ReplayGain, EQ, gapless groundwork). |
+| `0.2.0` | Artists view with track counts, pagination on every list view, in-place drill-downs (album / genre / year / artist) with breadcrumbs, release pipeline on `v*` tags. |

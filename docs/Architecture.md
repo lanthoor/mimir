@@ -540,4 +540,4 @@ flowchart LR
 
 `.github/workflows/release.yml` builds a Linux (AppImage + .deb) and macOS (.dmg) matrix on a `v*` tag, then publishes them as a GitHub release with a git-cliff changelog.
 
-> **Current status:** `0.1.0` ships Linux AppImage + .deb and macOS .dmg via `tauri build`; CI also produces a stripped `mimir-linux-x86_64` binary on every push. Windows MSI, Flatpak, signing/notarization, and auto-update are deferred to Tier 6 — see the [feature checklist](Plan.md#feature-checklist).
+> **Current status:** `0.2.0` ships Linux AppImage + .deb and macOS .dmg via `tauri build`; CI also produces a stripped `mimir-linux-x86_64` binary on every push. Windows MSI, Flatpak, signing/notarization, and auto-update are deferred to Tier 6 — see the [feature checklist](Plan.md#feature-checklist).
