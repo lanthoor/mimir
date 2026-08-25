@@ -91,20 +91,23 @@ type Store = {
   setAlbumsTotal: (total: PageState["total"]) => void;
   setAlbumsPageSize: (size: PageState["pageSize"]) => void;
 
-  artists: { page: PageState };
+  artists: { page: PageState; selectedArtistId: number | null };
   setArtistsPage: (p: PageState["page"]) => void;
   setArtistsTotal: (total: PageState["total"]) => void;
   setArtistsPageSize: (size: PageState["pageSize"]) => void;
+  selectArtist: (id: number | null) => void;
 
-  genres: { page: PageState };
+  genres: { page: PageState; selectedGenre: string | null };
   setGenresPage: (p: PageState["page"]) => void;
   setGenresTotal: (total: PageState["total"]) => void;
   setGenresPageSize: (size: PageState["pageSize"]) => void;
+  selectGenre: (name: string | null) => void;
 
-  years: { page: PageState };
+  years: { page: PageState; selectedYear: number | null };
   setYearsPage: (p: PageState["page"]) => void;
   setYearsTotal: (total: PageState["total"]) => void;
   setYearsPageSize: (size: PageState["pageSize"]) => void;
+  selectYear: (year: number | null) => void;
 
   folders: {
     mode: FoldersMode;
@@ -308,7 +311,7 @@ export const useStore = create<Store>()(
           },
         })),
 
-      artists: { page: DEFAULT_PAGE() },
+      artists: { page: DEFAULT_PAGE(), selectedArtistId: null },
       setArtistsPage: (page) =>
         set((s) => ({ artists: { ...s.artists, page: { ...s.artists.page, page } } })),
       setArtistsTotal: (total) =>
@@ -319,8 +322,10 @@ export const useStore = create<Store>()(
         set((s) => ({
           artists: { ...s.artists, page: { ...s.artists.page, pageSize } },
         })),
+      selectArtist: (id) =>
+        set((s) => ({ artists: { ...s.artists, selectedArtistId: id } })),
 
-      genres: { page: DEFAULT_PAGE() },
+      genres: { page: DEFAULT_PAGE(), selectedGenre: null },
       setGenresPage: (page) =>
         set((s) => ({ genres: { ...s.genres, page: { ...s.genres.page, page } } })),
       setGenresTotal: (total) =>
@@ -331,8 +336,10 @@ export const useStore = create<Store>()(
         set((s) => ({
           genres: { ...s.genres, page: { ...s.genres.page, pageSize } },
         })),
+      selectGenre: (name) =>
+        set((s) => ({ genres: { ...s.genres, selectedGenre: name } })),
 
-      years: { page: DEFAULT_PAGE() },
+      years: { page: DEFAULT_PAGE(), selectedYear: null },
       setYearsPage: (page) =>
         set((s) => ({ years: { ...s.years, page: { ...s.years.page, page } } })),
       setYearsTotal: (total) =>
@@ -343,6 +350,8 @@ export const useStore = create<Store>()(
         set((s) => ({
           years: { ...s.years, page: { ...s.years.page, pageSize } },
         })),
+      selectYear: (year) =>
+        set((s) => ({ years: { ...s.years, selectedYear: year } })),
 
       folders: {
         mode: "icons",

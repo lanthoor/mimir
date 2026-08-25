@@ -16,17 +16,17 @@ export function AlbumsView() {
       <ViewToolbar view="albums" />
       {selectedAlbumId != null ? (
         <AlbumDetail albumId={selectedAlbumId} />
-      ) : mode === "list" ? (
-        <AlbumsList />
       ) : (
-        <AlbumsIcons />
+        <>
+          {mode === "list" ? <AlbumsList /> : <AlbumsIcons />}
+          <PaginationBar
+            page={page.page}
+            pageSize={page.pageSize}
+            total={page.total}
+            onChange={setAlbumsPage}
+          />
+        </>
       )}
-      <PaginationBar
-        page={page.page}
-        pageSize={page.pageSize}
-        total={page.total}
-        onChange={setAlbumsPage}
-      />
     </div>
   );
 }

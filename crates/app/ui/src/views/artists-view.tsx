@@ -5,12 +5,13 @@ import { Music } from "lucide-react";
 import { PaginationBar } from "@/components/pagination-bar";
 import { useArtistsPage } from "@/hooks/use-pages";
 import { useVisibleFit } from "@/hooks/use-visible-fit";
+import { FilteredTracksDetail } from "@/views/filtered-tracks-detail";
 
 export function ArtistsView() {
   useArtistsPage();
   const items = useStore((s) => s.artistsList);
-  const setView = useStore((s) => s.setView);
-  const setTracksFilter = useStore((s) => s.setTracksFilter);
+  const selectedArtistId = useStore((s) => s.artists.selectedArtistId);
+  const selectArtist = useStore((s) => s.selectArtist);
   const page = useStore((s) => s.artists.page);
   const setArtistsPage = useStore((s) => s.setArtistsPage);
   const setArtistsPageSize = useStore((s) => s.setArtistsPageSize);
@@ -28,6 +29,21 @@ export function ArtistsView() {
     onChange: setArtistsPageSize,
   });
 
+  if (selectedArtistId != null) {
+    const artist = items.find((a) => a.id === selectedArtistId);
+    return (
+      <div className="flex h-full flex-col gap-2 p-4">
+        <FilteredTracksDetail
+          filter={{ artistId: selectedArtistId }}
+          rootLabel="Artists"
+          currentLabel={artist?.name ?? `#${selectedArtistId}`}
+          icon={<Music className="h-5 w-5" />}
+          onBack={() => selectArtist(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col gap-2 p-4">
       <div ref={containerRef} className="flex-1 overflow-hidden">
@@ -43,15 +59,7 @@ export function ArtistsView() {
                 key={a.id}
                 ref={i === 0 ? probeRef : null}
                 className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:border-primary"
-                onClick={() => {
-                  setTracksFilter({
-                    genre: null,
-                    year: null,
-                    artistId: a.id,
-                    albumId: null,
-                  });
-                  setView("tracks");
-                }}
+                onClick={() => selectArtist(a.id)}
               >
                 <Music className="h-8 w-8 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">

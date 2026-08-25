@@ -1,25 +1,39 @@
-import { ArrowLeft, Play } from "lucide-react";
+import { LayoutGrid, List, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { AlbumCover } from "@/components/album-cover";
 import { useStore } from "@/lib/store";
 import * as ipc from "@/lib/ipc";
 import { AlbumTracksTable } from "@/views/album-tracks-table";
+import { TracksIcons } from "@/views/tracks-icons";
+import { PaginationBar } from "@/components/pagination-bar";
+import { ModeToggle2 } from "@/views/view-toolbar";
 import { addAlbumToQueue } from "@/lib/queue-actions";
-import { useAlbumTracksPage } from "@/hooks/use-pages";
+import { useFilteredTracksPage } from "@/hooks/use-pages";
 
 type Props = { albumId: number };
 
 export function AlbumDetail({ albumId }: Props) {
-  // Page-fetching hook for the per-album tracks. Writes to `tracksList`
-  // / `tracks.page` so the parent `<AlbumsView>`'s pagination bar can
-  // drive this view's paging without a duplicate bar here.
-  useAlbumTracksPage(albumId);
+  useFilteredTracksPage({ albumId });
   const selectAlbum = useStore((s) => s.selectAlbum);
   const album = useStore((s) =>
     s.albumsList.find((a) => a.id === albumId),
   );
   const tracks = useStore((s) => s.tracksList);
+  const total = useStore((s) => s.tracks.page.total);
+  const page = useStore((s) => s.tracks.page.page);
+  const pageSize = useStore((s) => s.tracks.page.pageSize);
+  const setTracksPage = useStore((s) => s.setTracksPage);
+  const mode = useStore((s) => s.tracks.mode);
+  const setTracksMode = useStore((s) => s.setTracksMode);
   const setNowPlaying = useStore((s) => s.setNowPlaying);
   const setNowPlayingTrackId = useStore((s) => s.setNowPlayingTrackId);
   const setLyricsTrackId = useStore((s) => s.setLyricsTrackId);
@@ -33,16 +47,23 @@ export function AlbumDetail({ albumId }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-1 flex-col gap-4">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <button type="button" onClick={() => selectAlbum(null)}>
+                Albums
+              </button>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{album.title}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
       <div className="flex items-center gap-4">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => selectAlbum(null)}
-        >
-          <ArrowLeft />
-          Albums
-        </Button>
         <AlbumCover albumId={album.id} className="h-28 w-28 rounded-md" />
         <div className="flex min-w-0 flex-col">
           <div className="text-2xl font-bold">{album.title}</div>
@@ -57,6 +78,14 @@ export function AlbumDetail({ albumId }: Props) {
           </div>
         </div>
         <div className="ml-auto flex gap-2">
+          <ModeToggle2
+            value={mode}
+            onChange={setTracksMode}
+            options={[
+              { value: "icons", label: <LayoutGrid className="h-4 w-4" /> },
+              { value: "list", label: <List className="h-4 w-4" /> },
+            ]}
+          />
           <Button
             variant="default"
             size="sm"
@@ -93,9 +122,17 @@ export function AlbumDetail({ albumId }: Props) {
         <div className="p-6 text-sm text-muted-foreground">
           No tracks indexed.
         </div>
-      ) : (
+      ) : mode === "list" ? (
         <AlbumTracksTable tracks={tracks} />
+      ) : (
+        <TracksIcons />
       )}
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onChange={setTracksPage}
+      />
     </div>
   );
 }

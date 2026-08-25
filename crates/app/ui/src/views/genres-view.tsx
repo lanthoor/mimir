@@ -5,12 +5,13 @@ import { Tags } from "lucide-react";
 import { PaginationBar } from "@/components/pagination-bar";
 import { useGenresPage } from "@/hooks/use-pages";
 import { useVisibleFit } from "@/hooks/use-visible-fit";
+import { FilteredTracksDetail } from "@/views/filtered-tracks-detail";
 
 export function GenresView() {
   useGenresPage();
   const items = useStore((s) => s.genresList);
-  const setView = useStore((s) => s.setView);
-  const setTracksFilter = useStore((s) => s.setTracksFilter);
+  const selectedGenre = useStore((s) => s.genres.selectedGenre);
+  const selectGenre = useStore((s) => s.selectGenre);
   const page = useStore((s) => s.genres.page);
   const setGenresPage = useStore((s) => s.setGenresPage);
   const setGenresPageSize = useStore((s) => s.setGenresPageSize);
@@ -28,6 +29,20 @@ export function GenresView() {
     onChange: setGenresPageSize,
   });
 
+  if (selectedGenre != null) {
+    return (
+      <div className="flex h-full flex-col gap-2 p-4">
+        <FilteredTracksDetail
+          filter={{ genre: selectedGenre }}
+          rootLabel="Genres"
+          currentLabel={selectedGenre}
+          icon={<Tags className="h-5 w-5" />}
+          onBack={() => selectGenre(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col gap-2 p-4">
       <div ref={containerRef} className="flex-1 overflow-hidden">
@@ -43,15 +58,7 @@ export function GenresView() {
                 key={g.name}
                 ref={i === 0 ? probeRef : null}
                 className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:border-primary"
-                onClick={() => {
-                  setTracksFilter({
-                    genre: g.name,
-                    year: null,
-                    artistId: null,
-                    albumId: null,
-                  });
-                  setView("tracks");
-                }}
+                onClick={() => selectGenre(g.name)}
               >
                 <Tags className="h-8 w-8 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
